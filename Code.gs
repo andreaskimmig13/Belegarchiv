@@ -557,14 +557,22 @@ function ghFetch_(path) {
   const repo = p.getProperty('GITHUB_REPO');
   if (!repo) throw new Error('Kein GitHub-Repository eingetragen (Mehr → Einstellungen).');
   const branch = p.getProperty('GITHUB_BRANCH') || 'main';
-  const res = UrlFetchApp.fetch('https://api.github.com/repos/' + repo + '/contents/' + path + '?ref=' + encodeURIComponent(branch), {
-    headers: { Accept: 'application/vnd.github.raw', 'User-Agent': 'Belegarchiv' },
-    muteHttpExceptions: true
-  });
-  const code = res.getResponseCode();
-  if (code === 404) throw new Error('„' + path + '“ wurde im Repository ' + repo + ' nicht gefunden. Ist das Repository öffentlich?');
-  if (code !== 200) throw new Error('GitHub antwortet mit Fehler ' + code + '.');
-  return res.getContentText();
+  const urls = [
+    'https://raw.githubusercontent.com/' + repo + '/' + branch + '/' + path + '?t=' + Date.now(),
+    'https://cdn.jsdelivr.net/gh/' + repo + '@' + branch + '/' + path
+  ];
+  let last = '';
+  for (const url of urls) {
+    try {
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true, headers: { 'Cache-Control': 'no-cache' } });
+      const code = res.getResponseCode();
+      if (code === 200) return res.getContentText();
+      last = code === 404
+        ? '„' + path + '“ wurde im Repository ' + repo + ' nicht gefunden. Stimmt der Name und ist das Repository öffentlich?'
+        : 'GitHub antwortet mit Fehler ' + code + '.';
+    } catch (e) { last = String(e); }
+  }
+  throw new Error(last);
 }
 
 function cmpVer_(a, b) {
