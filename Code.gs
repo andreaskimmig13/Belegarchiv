@@ -7,13 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.4.0';
-
-const UPDATE_FILES = [
-  { name: 'Code', type: 'SERVER_JS', path: 'Code.gs' },
-  { name: 'Index', type: 'HTML', path: 'Index.html' },
-  { name: 'appsscript', type: 'JSON', path: 'appsscript.json' }
-];
+const APP_VERSION = '1.4.1';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -84,6 +78,7 @@ function setup() {
   if (!p.getProperty('PERSONEN')) p.setProperty('PERSONEN', JSON.stringify(DEFAULT_PERSONEN));
   if (!p.getProperty('KATEGORIEN')) p.setProperty('KATEGORIEN', JSON.stringify(DEFAULT_KATEGORIEN));
   if (!p.getProperty('MODEL')) p.setProperty('MODEL', CFG.DEFAULT_MODEL);
+  p.deleteProperty('GITHUB_REPO');
 
   if (!GmailApp.getUserLabelByName(CFG.GMAIL_LABEL)) GmailApp.createLabel(CFG.GMAIL_LABEL);
 
@@ -121,7 +116,6 @@ function getInit() {
     ordnerUrl: DriveApp.getFolderById(p.getProperty('ROOT_FOLDER_ID')).getUrl(),
     tabelleUrl: SpreadsheetApp.openById(p.getProperty('SPREADSHEET_ID')).getUrl(),
     appVersion: APP_VERSION,
-    githubRepo: p.getProperty('GITHUB_REPO') || '',
     belege: getAllRows_()
   };
 }
@@ -536,98 +530,12 @@ function saveSettings(s) {
   if (s.kategorien) p.setProperty('KATEGORIEN', JSON.stringify(clean(s.kategorien)));
   if (s.apiKey) p.setProperty('ANTHROPIC_API_KEY', String(s.apiKey).trim());
   if (s.model) p.setProperty('MODEL', String(s.model).trim());
-  if (s.githubRepo != null) {
-    const repo = String(s.githubRepo).trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, '');
-    if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('GitHub-Repository bitte im Format Benutzername/Repository angeben.');
-    p.setProperty('GITHUB_REPO', repo);
-  }
   return {
     personen: JSON.parse(p.getProperty('PERSONEN')),
     kategorien: JSON.parse(p.getProperty('KATEGORIEN')),
     hatKey: !!p.getProperty('ANTHROPIC_API_KEY'),
-    model: p.getProperty('MODEL'),
-    githubRepo: p.getProperty('GITHUB_REPO') || ''
+    model: p.getProperty('MODEL')
   };
-}
-
-/* ───────────────────────── Selbst-Update ───────────────────────── */
-
-function ghFetch_(path) {
-  const p = props_();
-  const repo = p.getProperty('GITHUB_REPO');
-  if (!repo) throw new Error('Kein GitHub-Repository eingetragen (Mehr → Einstellungen).');
-  const branch = p.getProperty('GITHUB_BRANCH') || 'main';
-  const urls = [
-    'https://raw.githubusercontent.com/' + repo + '/' + branch + '/' + path + '?t=' + Date.now(),
-    'https://cdn.jsdelivr.net/gh/' + repo + '@' + branch + '/' + path
-  ];
-  let last = '';
-  for (const url of urls) {
-    try {
-      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true, headers: { 'Cache-Control': 'no-cache' } });
-      const code = res.getResponseCode();
-      if (code === 200) return res.getContentText();
-      last = code === 404
-        ? '„' + path + '“ wurde im Repository ' + repo + ' nicht gefunden. Stimmt der Name und ist das Repository öffentlich?'
-        : 'GitHub antwortet mit Fehler ' + code + '.';
-    } catch (e) { last = String(e); }
-  }
-  throw new Error(last);
-}
-
-function cmpVer_(a, b) {
-  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const d = (x[i] || 0) - (y[i] || 0);
-    if (d) return d > 0 ? 1 : -1;
-  }
-  return 0;
-}
-
-function checkUpdate() {
-  const v = JSON.parse(ghFetch_('version.json'));
-  return { aktuell: APP_VERSION, neu: v.version, notes: v.notes || '', verfuegbar: cmpVer_(v.version, APP_VERSION) > 0 };
-}
-
-function runUpdate() {
-  const info = JSON.parse(ghFetch_('version.json'));
-  const files = UPDATE_FILES.map(f => ({ name: f.name, type: f.type, source: ghFetch_(f.path) }));
-  if (!/function doGet\(/.test(files[0].source) || files[1].source.indexOf('</html>') < 0) {
-    throw new Error('Die heruntergeladenen Dateien sind unvollständig – Update abgebrochen, nichts wurde geändert.');
-  }
-  JSON.parse(files[2].source);
-
-  const base = 'https://script.googleapis.com/v1/projects/' + ScriptApp.getScriptId();
-  const call = (url, method, payload) => {
-    const opt = { method: method, muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } };
-    if (payload) { opt.contentType = 'application/json'; opt.payload = JSON.stringify(payload); }
-    const r = UrlFetchApp.fetch(url, opt);
-    const txt = r.getContentText();
-    if (r.getResponseCode() >= 300) {
-      let m = txt;
-      try { m = JSON.parse(txt).error.message; } catch (e) { /* roh */ }
-      if (/not been used|disabled|not enabled/i.test(m)) {
-        m = 'Bitte zuerst die „Google Apps Script API“ einschalten: script.google.com/home/usersettings';
-      }
-      throw new Error('Update fehlgeschlagen: ' + m);
-    }
-    return txt ? JSON.parse(txt) : {};
-  };
-
-  call(base + '/content', 'put', { files: files });
-  const ver = call(base + '/versions', 'post', { description: 'Belegarchiv ' + info.version });
-  const deps = call(base + '/deployments', 'get').deployments || [];
-  let n = 0;
-  deps.forEach(d => {
-    const c = d.deploymentConfig || {};
-    if (c.versionNumber) {
-      call(base + '/deployments/' + d.deploymentId, 'put', {
-        deploymentConfig: { versionNumber: ver.versionNumber, manifestFileName: 'appsscript', description: 'Belegarchiv ' + info.version }
-      });
-      n++;
-    }
-  });
-  return { version: info.version, bereitstellungen: n, url: ScriptApp.getService().getUrl() };
 }
 
 /* ───────────────────────── Kalender ───────────────────────── */

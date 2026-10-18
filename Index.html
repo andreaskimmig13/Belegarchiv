@@ -219,7 +219,7 @@ const ICON = {
 };
 
 const S = {
-  belege: [], personen: [], kategorien: [], hatKey: false, model: '', ordnerUrl: '', tabelleUrl: '', appVersion: '', githubRepo: '',
+  belege: [], personen: [], kategorien: [], hatKey: false, model: '', ordnerUrl: '', tabelleUrl: '', appVersion: '',
   tab: 'erfassen', capture: null,
   filter: { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: false, steuer: false },
   dash: { jahr: new Date().getFullYear(), person: '', monat: null, hidden: loadHidden() }
@@ -869,13 +869,10 @@ function renderMehr() {
     <label class="fld"><span>Kategorien <small>– eine pro Zeile</small></span><textarea rows="7" data-s="kategorien">${esc(S.kategorien.join('\n'))}</textarea></label>
     <label class="fld"><span>Claude API-Schlüssel ${S.hatKey ? '<small>– hinterlegt ✓</small>' : ''}</span><input type="password" autocomplete="off" data-s="apiKey" placeholder="${S.hatKey ? 'Nur zum Ändern neu eingeben' : 'sk-ant-…'}"></label>
     <label class="fld"><span>KI-Modell</span><input data-s="model" value="${esc(S.model)}"></label>
-    <label class="fld"><span>GitHub-Repository für Updates</span><input data-s="githubRepo" value="${esc(S.githubRepo)}" placeholder="benutzername/belegarchiv" autocapitalize="off" autocomplete="off"></label>
     <div class="grid2" style="margin-top:14px"><button class="btn" data-test>Verbindung testen</button><button class="btn primary" data-sset>Speichern</button></div>
   </section>
   <section class="card">
     <h3><span>App-Version</span><small>${esc(S.appVersion)}</small></h3>
-    <div data-upd><button class="btn block" data-upcheck ${S.githubRepo ? '' : 'disabled'}>Nach Updates suchen</button>
-    ${S.githubRepo ? '' : '<p class="hint">Trage unten bei den Einstellungen dein GitHub-Repository ein.</p>'}</div>
   </section>
   <section class="card">
     <h3><span>Daten in Google Drive</span></h3>
@@ -907,30 +904,9 @@ function renderMehr() {
     if (!p.length || !k.length) { toast('Mindestens eine Person und eine Kategorie angeben.', 'err'); return; }
     busy('Wird gespeichert …');
     try {
-      const r = await api.saveSettings({ personen: p, kategorien: k, apiKey: $('[data-s="apiKey"]').value, model: $('[data-s="model"]').value, githubRepo: $('[data-s="githubRepo"]').value });
+      const r = await api.saveSettings({ personen: p, kategorien: k, apiKey: $('[data-s="apiKey"]').value, model: $('[data-s="model"]').value});
       Object.assign(S, r); busy(false); toast('Einstellungen gespeichert ✓'); renderMehr();
     } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
-  };
-  const uc = $('[data-upcheck]');
-  if (uc) uc.onclick = async () => {
-    const box = $('[data-upd]');
-    box.innerHTML = '<p class="muted"><span class="spin"></span> Suche nach Updates …</p>';
-    try {
-      const r = await api.checkUpdate();
-      if (!r.verfuegbar) { box.innerHTML = `<p class="hint">Du hast die neueste Version (${esc(r.aktuell)}).</p>`; return; }
-      box.innerHTML = `<p style="margin:0 0 4px"><b>Version ${esc(r.neu)} ist verfügbar</b></p>
-        ${r.notes ? `<p class="muted" style="margin:0 0 10px;font-size:14px;white-space:pre-line">${esc(r.notes)}</p>` : ''}
-        <button class="btn primary block" data-upgo>Jetzt aktualisieren</button>`;
-      $('[data-upgo]').onclick = async () => {
-        busy('Update wird installiert …');
-        try {
-          const u = await api.runUpdate();
-          busy(false);
-          box.innerHTML = `<p class="hint">Version ${esc(u.version)} ist installiert. Bitte die App neu öffnen.</p>
-            <a class="btn primary block" href="${esc(u.url)}" target="_top" style="margin-top:10px">Neu laden</a>`;
-        } catch (e) { busy(false); box.innerHTML = `<p class="hint warn">${esc(errMsg(e))}</p>`; }
-      };
-    } catch (e) { box.innerHTML = `<p class="hint warn">${esc(errMsg(e))}</p>`; }
   };
   $('[data-test]').onclick = async () => {
     busy('Verbindung wird getestet …');

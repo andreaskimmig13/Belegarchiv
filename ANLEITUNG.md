@@ -56,13 +56,12 @@ Fertig. Beim ersten Foto fragt das Handy, ob die App auf die Kamera zugreifen da
 3. Jede Person muss beim ersten Öffnen die Berechtigungen bestätigen.
    Hinweis: Der API-Schlüssel ist in den Skripteigenschaften gespeichert und wird mitbenutzt.
 
-## Updates (ab Version 1.3)
-Einmalig:
-1. **script.google.com/home/usersettings** → *Google Apps Script API* auf **An**.
-2. In der App unter *Mehr → Einstellungen* das GitHub-Repository eintragen: `andreaskimmig13/belegarchiv`.
+## Updates
+1. Neue Dateien bei script.google.com einfügen und speichern.
+2. **Bereitstellen → Bereitstellungen verwalten → Bearbeiten (Stift) → Version: Neue Version → Bereitstellen.**
+   (Wer die Test-Adresse `…/dev` nutzt, kann Schritt 2 weglassen.)
 
-Danach: *Mehr → Nach Updates suchen → Jetzt aktualisieren → Neu laden*.
-Zurück zur vorherigen Version: script.google.com → *Bereitstellen → Bereitstellungen verwalten → Bearbeiten* → ältere Version wählen.
+Die App aktualisiert sich bewusst **nicht** selbst: Code aus diesem Repository gelangt nur in die App, wenn er von Hand eingefügt wird.
 
 ## App-Logo auf dem Homescreen
 Statt der Google-Adresse die Startseite **andreaskimmig13.github.io/Belegarchiv** auf den Homescreen legen.
