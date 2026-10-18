@@ -7,7 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 
 const UPDATE_FILES = [
   { name: 'Code', type: 'SERVER_JS', path: 'Code.gs' },
@@ -104,6 +104,7 @@ function setup() {
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Belegarchiv')
+    .setFaviconUrl('https://andreaskimmig13.github.io/Belegarchiv/favicon.png')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
     .addMetaTag('apple-mobile-web-app-capable', 'yes')
     .addMetaTag('mobile-web-app-capable', 'yes');

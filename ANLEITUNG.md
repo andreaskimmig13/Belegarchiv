@@ -63,3 +63,7 @@ Einmalig:
 
 Danach: *Mehr → Nach Updates suchen → Jetzt aktualisieren → Neu laden*.
 Zurück zur vorherigen Version: script.google.com → *Bereitstellen → Bereitstellungen verwalten → Bearbeiten* → ältere Version wählen.
+
+## App-Logo auf dem Homescreen
+Statt der Google-Adresse die Startseite **andreaskimmig13.github.io/Belegarchiv** auf den Homescreen legen.
+Sie zeigt das Logo und leitet sofort zur App weiter. (Zum Ansehen ohne Weiterleitung: `…/Belegarchiv/?stay`.)
