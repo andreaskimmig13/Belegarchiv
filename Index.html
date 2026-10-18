@@ -147,6 +147,13 @@ nav.tabs button.on{color:var(--accent);font-weight:650}
 .chart svg{width:100%;height:auto;display:block}
 .chart text{font-size:10px;fill:var(--muted)}
 .chart .sel{fill:var(--ink);font-weight:700}
+.katfilter{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.katfilter::-webkit-scrollbar{display:none}
+.katfilter .chip{white-space:nowrap;font-size:13px;padding:6px 11px;background:var(--card);display:inline-flex;align-items:center;gap:6px}
+.katfilter .chip i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.katfilter .katchip.on{background:var(--card);color:var(--ink);border-color:var(--ink);font-weight:600}
+.katfilter .katchip.off{opacity:.45;text-decoration:line-through}
+.katfilter .chip[data-katall].on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
 .legend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px;color:var(--muted);margin-top:8px}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px}
 .katrow{display:block;width:100%;border:0;background:none;text-align:left;padding:8px 0;cursor:pointer}
@@ -215,10 +222,12 @@ const S = {
   belege: [], personen: [], kategorien: [], hatKey: false, model: '', ordnerUrl: '', tabelleUrl: '', appVersion: '', githubRepo: '',
   tab: 'erfassen', capture: null,
   filter: { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: false, steuer: false },
-  dash: { jahr: new Date().getFullYear(), person: '', monat: null }
+  dash: { jahr: new Date().getFullYear(), person: '', monat: null, hidden: loadHidden() }
 };
 
 /* ───── Hilfen ───── */
+function loadHidden() { try { return new Set(JSON.parse(localStorage.getItem('belegarchiv.hiddenKats') || '[]')); } catch (e) { return new Set(); } }
+function saveHidden(set) { try { localStorage.setItem('belegarchiv.hiddenKats', JSON.stringify([...set])); } catch (e) { /* ohne Speicher weiter */ } }
 const pad = n => String(n).padStart(2, '0');
 const toIso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 const todayIso = () => toIso(new Date());
@@ -733,7 +742,11 @@ function years() {
 }
 function renderDashboard() {
   const D = S.dash, now = new Date();
-  const rows = S.belege.filter(b => (b.datum || '').startsWith(String(D.jahr)) && (!D.person || personList(b.personen).includes(D.person)));
+  const rowsAll = S.belege.filter(b => (b.datum || '').startsWith(String(D.jahr)) && (!D.person || personList(b.personen).includes(D.person)));
+  const rows = rowsAll.filter(b => !D.hidden.has(b.kategorie));
+  const allKats = [...S.kategorien, ...new Set(rowsAll.map(b => b.kategorie).filter(k => !S.kategorien.includes(k)))];
+  const katSum = {}; rowsAll.forEach(b => katSum[b.kategorie] = (katSum[b.kategorie] || 0) + b.betrag);
+  const nHidden = allKats.filter(k => D.hidden.has(k)).length;
   const byMonth = Array.from({ length: 12 }, () => ({}));
   rows.forEach(b => { const m = +b.datum.slice(5, 7) - 1; byMonth[m][b.kategorie] = (byMonth[m][b.kategorie] || 0) + b.betrag; });
   const total = rows.reduce((s, b) => s + b.betrag, 0);
@@ -748,13 +761,17 @@ function renderDashboard() {
   const gar = S.belege.filter(b => b.garantie_bis && b.garantie_bis >= heute && b.garantie_bis <= bald).sort((a, b) => a.garantie_bis.localeCompare(b.garantie_bis)).slice(0, 8);
   const unbez = S.belege.filter(b => b.bezahlt === false).sort((a, b) => (a.faellig_am || '9999').localeCompare(b.faellig_am || '9999'));
   const scopeLabel = D.monat == null ? String(D.jahr) : MONATE_LANG[D.monat] + ' ' + D.jahr;
-  const usedKats = [...new Set(rows.map(b => b.kategorie))];
 
   $('#main').innerHTML = `
   <div class="dashsel">
     <select data-d="jahr">${years().map(y => `<option ${y === D.jahr ? 'selected' : ''}>${y}</option>`).join('')}</select>
     <select data-d="person"><option value="">Alle Personen</option>${S.personen.map(p => `<option ${p === D.person ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
   </div>
+  <div class="katfilter">
+    <button class="chip ${nHidden ? '' : 'on'}" data-katall>Alle</button>
+    ${allKats.map(k => `<button class="chip katchip ${D.hidden.has(k) ? 'off' : 'on'}" data-kt="${esc(k)}" aria-pressed="${!D.hidden.has(k)}"><i style="background:${katColor(k)}"></i>${esc(k)}${katSum[k] ? '' : ' <small>–</small>'}</button>`).join('')}
+  </div>
+  ${nHidden ? `<p class="hint" style="margin:-2px 2px 10px">${nHidden} Kategorie${nHidden > 1 ? 'n' : ''} ausgeblendet – alle Zahlen unten ohne diese.</p>` : ''}
   <div class="kpis">
     <div class="kpi"><small>Ausgaben ${D.jahr}</small><b>${EUR0.format(total)}</b></div>
     <div class="kpi"><small>Ø pro Monat</small><b>${EUR0.format(total / monate)}</b></div>
@@ -763,7 +780,6 @@ function renderDashboard() {
   <section class="card chart">
     <h3><span>Ausgaben pro Monat</span>${D.monat != null ? '<button class="link" data-allm>Ganzes Jahr</button>' : '<small>Monat antippen</small>'}</h3>
     ${chartSvg(byMonth, D.monat)}
-    <div class="legend">${usedKats.map(k => `<span><i style="background:${katColor(k)}"></i>${esc(k)}</span>`).join('')}</div>
   </section>
   <section class="card">
     <h3><span>Nach Kategorie · ${esc(scopeLabel)}</span><small>${EUR.format(scopeSum)}</small></h3>
@@ -784,6 +800,15 @@ function renderDashboard() {
   $$('[data-d]').forEach(s => s.addEventListener('change', e => {
     const k = e.target.dataset.d; D[k] = k === 'jahr' ? +e.target.value : e.target.value; if (k === 'jahr') D.monat = null; renderDashboard();
   }));
+  $$('[data-kt]').forEach(c => c.onclick = () => {
+    const k = c.dataset.kt;
+    if (D.hidden.has(k)) D.hidden.delete(k); else D.hidden.add(k);
+    saveHidden(D.hidden); renderDashboard();
+  });
+  $('[data-katall]').onclick = () => {
+    if (nHidden) D.hidden.clear(); else allKats.forEach(k => D.hidden.add(k));
+    saveHidden(D.hidden); renderDashboard();
+  };
   $$('[data-m]').forEach(r => r.addEventListener('click', () => { const m = +r.dataset.m; D.monat = D.monat === m ? null : m; renderDashboard(); }));
   const am = $('[data-allm]'); if (am) am.onclick = () => { D.monat = null; renderDashboard(); };
   $$('[data-kat]').forEach(r => r.onclick = () => {
