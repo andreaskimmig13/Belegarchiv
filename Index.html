@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Belegarchiv</title>
+<style>
+:root{
+  --bg:#f5f4f0; --card:#ffffff; --ink:#1c1e21; --muted:#6b7078; --line:#e5e2db;
+  --accent:#0f766e; --accent-ink:#ffffff; --accent-soft:#e3f1ee;
+  --warn:#b45309; --warn-soft:#fdf1e2; --danger:#b91c1c; --danger-soft:#fde8e8;
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.05);
+  --r:14px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#111315; --card:#1a1d20; --ink:#ebe9e4; --muted:#9aa0a7; --line:#2b2f34;
+    --accent:#2dd4bf; --accent-ink:#06201d; --accent-soft:#11302c;
+    --warn:#f59e0b; --warn-soft:#2e2310; --danger:#f87171; --danger-soft:#341616;
+    --shadow:none;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{margin:0;letter-spacing:-.01em}
+small{color:var(--muted)}
+.muted{color:var(--muted)}
+[hidden]{display:none!important}
+
+header.top{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  padding:calc(env(safe-area-inset-top) + 14px) 16px 10px;display:flex;align-items:baseline;justify-content:space-between}
+header.top h1{font-size:24px;font-weight:750}
+header.top .sub{font-size:13px;color:var(--muted)}
+main{padding:4px 16px calc(96px + env(safe-area-inset-bottom));max-width:720px;margin:0 auto}
+
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;display:grid;grid-template-columns:repeat(4,1fr);
+  background:var(--card);border-top:1px solid var(--line);padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+nav.tabs button{border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;
+  font-size:11px;color:var(--muted);padding:6px 0;border-radius:10px;cursor:pointer}
+nav.tabs button svg{width:24px;height:24px}
+nav.tabs button.on{color:var(--accent);font-weight:650}
+
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);border:1px solid var(--line);padding:16px;margin:12px 0}
+.hero h2{font-size:19px;margin-bottom:4px}
+.btnrow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 6px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:var(--card);
+  border-radius:12px;padding:11px 14px;font-weight:600;cursor:pointer;text-decoration:none;color:var(--ink)}
+.btn svg{width:20px;height:20px}
+.btn.big{padding:18px 12px;flex-direction:column;font-size:14px}
+.btn.big svg{width:28px;height:28px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 35%,var(--line))}
+.btn.block{width:100%}
+.btn:disabled{opacity:.5}
+.link{border:0;background:none;color:var(--accent);font-weight:600;padding:6px 0;cursor:pointer}
+.hint{font-size:13px;color:var(--muted);margin:8px 0 0}
+.hint.warn{color:var(--warn);background:var(--warn-soft);padding:8px 10px;border-radius:10px}
+.notice{display:block;width:100%;text-align:left;background:var(--warn-soft);border-color:transparent;color:var(--warn);font-weight:600;cursor:pointer}
+
+.fld{display:block;margin:12px 0 0}
+.fld>span{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:5px}
+.fld input,.fld select,.fld textarea,.search input,.filters select{width:100%;border:1px solid var(--line);background:var(--bg);
+  border-radius:10px;padding:10px 12px;outline:none;-webkit-appearance:none;appearance:none}
+.fld select,.filters select{background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;background-size:5px 5px;background-repeat:no-repeat;padding-right:30px}
+.fld input:focus,.fld select:focus,.fld textarea:focus,.search input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.fld textarea{resize:vertical}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2 .fld{margin-top:12px}
+.quick{display:flex;gap:16px;margin-top:2px}
+.quick .link{font-size:13px}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:7px 13px;font-size:14px;cursor:pointer}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+
+.toggles{margin-top:14px;border-top:1px solid var(--line)}
+.tgl{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.tgl input{display:none}
+.tgl .sw{flex:none;width:42px;height:26px;border-radius:13px;background:var(--line);position:relative;transition:.2s}
+.tgl .sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:.2s}
+.tgl input:checked+.sw{background:var(--accent)}
+.tgl input:checked+.sw::after{left:19px}
+.tgl .tl{display:flex;flex-direction:column}
+.tgl .tl b{font-weight:600;font-size:14.5px}
+.tgl .tl small{font-size:12.5px}
+.lohn{padding-bottom:10px;border-bottom:1px solid var(--line);margin-top:0!important;padding-top:10px}
+
+.dup{background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:13.5px;margin-bottom:6px}
+.capture-head{display:flex;gap:12px;align-items:center}
+.thumb{width:64px;height:84px;border-radius:8px;object-fit:cover;background:var(--bg);border:1px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.pages{display:flex;gap:8px;overflow-x:auto;margin:12px 0 2px;padding-bottom:2px}
+.pg{position:relative;flex:none;width:62px;height:82px;border-radius:8px;border:1px solid var(--line);background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--muted);overflow:hidden}
+.pg img{width:100%;height:100%;object-fit:cover}
+.pg small{position:absolute;left:4px;bottom:3px;font-size:10px;font-weight:700;color:#fff;background:rgba(0,0,0,.55);border-radius:4px;padding:0 4px}
+.pg.add{flex-direction:column;border-style:dashed;cursor:pointer;color:var(--accent)}
+.pg.add b{font-size:24px;line-height:1}.pg.add small{position:static;background:none;color:var(--accent);padding:0}
+.pgdel{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:10px;cursor:pointer;padding:0}
+.actions{display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:16px}
+
+.skel{height:14px;border-radius:7px;background:linear-gradient(90deg,var(--line),var(--bg),var(--line));background-size:200% 100%;animation:sh 1.2s infinite;margin:10px 0}
+@keyframes sh{to{background-position:-200% 0}}
+.spin{width:18px;height:18px;border-radius:50%;border:2.5px solid var(--accent-soft);border-top-color:var(--accent);animation:rot .8s linear infinite;display:inline-block;vertical-align:-3px}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+.search{position:relative;margin-top:6px}
+.search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--muted)}
+.search input{padding-left:38px;background:var(--card);font-size:16px}
+.filters{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+.filters select{background-color:var(--card);font-size:13.5px;padding:8px 26px 8px 10px}
+.dashsel select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 30px 9px 12px;-webkit-appearance:none;appearance:none;
+  background:var(--card) linear-gradient(45deg,transparent 50%,var(--muted) 50%) calc(100% - 16px) 55%/5px 5px no-repeat;font-weight:600}
+.fchips{display:flex;gap:8px;margin-top:10px;overflow-x:auto}
+.fchips .chip{font-size:13px;padding:6px 11px;white-space:nowrap;background:var(--card)}
+.fchips .chip.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+
+.month{display:flex;justify-content:space-between;font-size:13px;font-weight:650;color:var(--muted);margin:18px 2px 6px;text-transform:uppercase;letter-spacing:.04em}
+.list{background:var(--card);border-radius:var(--r);border:1px solid var(--line);box-shadow:var(--shadow);overflow:hidden}
+.item{display:flex;gap:12px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;padding:12px 14px;cursor:pointer}
+.item:last-child{border-bottom:0}
+.item:active{background:var(--bg)}
+.dot{width:10px;height:10px;border-radius:50%;flex:none;margin-top:6px}
+.ibody{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.irow{display:flex;justify-content:space-between;gap:10px}
+.irow b{font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.irow .amt{flex:none;font-variant-numeric:tabular-nums}
+.irow.sub{font-size:13px;color:var(--muted)}
+.irow.sub span:last-child{flex:none}
+.prod{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.badge{font-size:11px;font-weight:650;padding:2px 7px;border-radius:6px;background:var(--bg);color:var(--muted)}
+.badge.warn{background:var(--warn-soft);color:var(--warn)}
+.badge.ok{background:var(--accent-soft);color:var(--accent)}
+.empty{text-align:center;color:var(--muted);padding:36px 12px}
+
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px;box-shadow:var(--shadow)}
+.kpi small{display:block;font-size:12px}
+.kpi b{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dashsel{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 10px}
+.card h3{font-size:15px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:baseline}
+.card h3 .link{font-size:13px;padding:0}
+.chart svg{width:100%;height:auto;display:block}
+.chart text{font-size:10px;fill:var(--muted)}
+.chart .sel{fill:var(--ink);font-weight:700}
+.legend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px}
+.katrow{display:block;width:100%;border:0;background:none;text-align:left;padding:8px 0;cursor:pointer}
+.katrow .irow{font-size:14px}
+.bar{height:7px;border-radius:4px;background:var(--bg);margin-top:5px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px}
+.mini{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.mini:last-child{border-bottom:0}
+
+.modal{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.4);display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--card);width:100%;max-width:640px;max-height:94vh;border-radius:18px 18px 0 0;display:flex;flex-direction:column;animation:up .22s ease}
+@keyframes up{from{transform:translateY(40px);opacity:.4}}
+.sheet header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
+.sheet header button{border:0;background:var(--bg);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:15px}
+.sbody{overflow:auto;padding:4px 16px 16px;-webkit-overflow-scrolling:touch}
+.sheet footer [data-save]{flex:1}
+.sheet footer{display:flex;gap:8px;padding:12px 16px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+.preview{margin-top:12px;text-align:center}
+.preview img{max-width:100%;max-height:260px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in}
+.preview img.zoom{max-height:none;cursor:zoom-out}
+.meta{font-size:12.5px;color:var(--muted);margin-top:10px}
+
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;
+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14px;font-weight:600;max-width:90vw;box-shadow:0 6px 20px rgba(0,0,0,.2)}
+.toast.err{background:var(--danger);color:#fff}
+.busy{position:fixed;inset:0;z-index:40;background:color-mix(in srgb,var(--bg) 70%,transparent);display:flex;align-items:center;justify-content:center;gap:10px;font-weight:600}
+.reslinks{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.section-title{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:22px 2px 0}
+.boot{padding:80px 20px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<header class="top"><h1 id="title">Erfassen</h1><span class="sub" id="subtitle"></span></header>
+<main id="main"><div class="boot"><span class="spin"></span><p>Belegarchiv wird geladen …</p></div></main>
+<nav class="tabs" id="tabs">
+  <button data-tab="erfassen" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Erfassen</button>
+  <button data-tab="archiv"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h6M9 16h6"/></svg>Archiv</button>
+  <button data-tab="uebersicht"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Übersicht</button>
+  <button data-tab="mehr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>Mehr</button>
+</nav>
+<div id="modal"></div>
+<datalist id="dl-haendler"></datalist>
+
+<script>
+/* ───── Grundlagen ───── */
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const api = new Proxy({}, { get: (_, fn) => (...args) => new Promise((res, rej) =>
+  google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args)) });
+const EUR = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+const EUR0 = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const PALETTE = ['#0f766e', '#2563eb', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#64748b', '#65a30d', '#db2777', '#7c3aed'];
+const MONATE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const MONATE_LANG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const STEUER = [['', 'Nein'], ['Handwerker/haushaltsnah', 'Handwerker / haushaltsnah (§35a)'], ['Kinderbetreuung', 'Kinderbetreuung']];
+const STEUER_KURZ = { 'Handwerker/haushaltsnah': 'Handwerker', 'Kinderbetreuung': 'Kinderbetreuung' };
+const ZAHLUNG = [['karte', 'Karte'], ['bar', 'Bar'], ['ueberweisung', 'Überweisung'], ['lastschrift', 'Lastschrift'], ['paypal', 'PayPal'], ['unbekannt', 'Unbekannt']];
+const ICON = {
+  cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>'
+};
+
+const S = {
+  belege: [], personen: [], kategorien: [], hatKey: false, model: '', ordnerUrl: '', tabelleUrl: '', appVersion: '', githubRepo: '',
+  tab: 'erfassen', capture: null,
+  filter: { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: false, steuer: false },
+  dash: { jahr: new Date().getFullYear(), person: '', monat: null }
+};
+
+/* ───── Hilfen ───── */
+const pad = n => String(n).padStart(2, '0');
+const toIso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const todayIso = () => toIso(new Date());
+function addIso(iso, { years = 0, days = 0 }) { const [y, m, d] = iso.split('-').map(Number); return toIso(new Date(y + years, m - 1, d + days)); }
+function fmtDate(iso) { if (!iso) return ''; const p = iso.split('-'); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : iso; }
+function personList(v) { return Array.isArray(v) ? v : String(v || '').split(',').map(s => s.trim()).filter(Boolean); }
+function prodList(v) { return Array.isArray(v) ? v : String(v || '').split(';').map(s => s.trim()).filter(Boolean); }
+function parseNum(s) {
+  if (typeof s === 'number') return s;
+  s = String(s || '').trim().replace(/[\s€]/g, '');
+  if (!s) return null;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(s); return isNaN(n) ? null : Math.round(n * 100) / 100;
+}
+function numDe(n) { return n == null || n === '' ? '' : (typeof n === 'number' ? n.toFixed(2) : String(n)).replace('.', ','); }
+function katColor(k) { const i = S.kategorien.indexOf(k); return PALETTE[(i < 0 ? S.kategorien.length : i) % PALETTE.length]; }
+function istAlle(pers) { return S.personen.length > 1 && S.personen.every(p => pers.includes(p)); }
+function personText(v) { const p = personList(v); return istAlle(p) ? 'Alle' : p.join(', '); }
+function errMsg(e) { return (e && (e.message || e.toString())) || 'Unbekannter Fehler'; }
+
+function toast(msg, type = '') {
+  const t = document.createElement('div'); t.className = 'toast ' + type; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), type === 'err' ? 5000 : 2600);
+}
+function busy(text) {
+  let b = $('.busy');
+  if (text === false) { b && b.remove(); return; }
+  if (!b) { b = document.createElement('div'); b.className = 'busy'; document.body.appendChild(b); }
+  b.innerHTML = `<span class="spin"></span><span>${esc(text || 'Bitte warten …')}</span>`;
+}
+function updateDatalist() {
+  const h = [...new Set(S.belege.map(b => b.haendler).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+  $('#dl-haendler').innerHTML = h.map(x => `<option value="${esc(x)}">`).join('');
+}
+
+/* ───── Navigation ───── */
+const TITLES = { erfassen: 'Erfassen', archiv: 'Archiv', uebersicht: 'Übersicht', mehr: 'Mehr' };
+function go(tab) {
+  S.tab = tab;
+  $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  $('#title').textContent = TITLES[tab];
+  $('#subtitle').textContent = '';
+  ({ erfassen: renderErfassen, archiv: renderArchiv, uebersicht: renderDashboard, mehr: renderMehr })[tab]();
+  window.scrollTo(0, 0);
+}
+$('#tabs').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (b) go(b.dataset.tab); });
+
+/* ───── Formular ───── */
+function toggle(name, label, sub, on) {
+  return `<label class="tgl"><input type="checkbox" name="${name}" ${on ? 'checked' : ''}><span class="sw"></span>
+    <span class="tl"><b>${label}</b><small>${sub}</small></span></label>`;
+}
+function formHtml(d, mode) {
+  const pers = personList(d.personen);
+  const kats = S.kategorien.includes(d.kategorie) || !d.kategorie ? S.kategorien : [...S.kategorien, d.kategorie];
+  return `
+  <div class="dup" hidden></div>
+  <div class="grid2">
+    <label class="fld"><span>Datum</span><input type="date" name="datum" value="${esc(d.datum || todayIso())}"></label>
+    <label class="fld"><span>Betrag (€)</span><input type="text" inputmode="decimal" name="betrag" value="${esc(numDe(d.betrag))}" placeholder="0,00"></label>
+  </div>
+  <label class="fld"><span>Händler</span><input name="haendler" list="dl-haendler" autocomplete="off" value="${esc(d.haendler)}" placeholder="z. B. Bauhaus"></label>
+  <label class="fld"><span>Kategorie</span><select name="kategorie">${kats.map(k => `<option ${k === d.kategorie ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+  <div class="fld"><span>Für wen</span><div class="chips" data-personen>
+    <button type="button" class="chip ${istAlle(pers) ? 'on' : ''}" data-all>Alle</button>
+    ${S.personen.map(p => `<button type="button" class="chip ${pers.includes(p) ? 'on' : ''}" data-p="${esc(p)}">${esc(p)}</button>`).join('')}
+  </div></div>
+  <label class="fld"><span>Produkte <small>– eine Zeile pro Artikel</small></span><textarea name="produkte" rows="3" placeholder="z. B. Akku-Bohrschrauber">${esc(prodList(d.produkte).join('\n'))}</textarea></label>
+  <label class="fld"><span>Zahlungsart</span><select name="zahlungsart">${ZAHLUNG.map(([v, l]) => `<option value="${v}" ${v === (d.zahlungsart || 'unbekannt') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+  <div class="toggles" style="margin-top:12px">
+    ${toggle('bezahlt', 'Bezahlt', 'Ausschalten für offene Rechnungen', d.bezahlt !== false)}
+    <label class="fld faellig" style="margin:0;padding:10px 0;border-bottom:1px solid var(--line)" ${d.bezahlt !== false ? 'hidden' : ''}><span>Fällig am <small>– Erinnerung 2 Tage vorher im Kalender</small></span><input type="date" name="faellig_am" value="${esc(d.faellig_am)}"></label>
+  </div>
+  <div class="grid2">
+    <label class="fld"><span>Garantie bis</span><input type="date" name="garantie_bis" value="${esc(d.garantie_bis)}"></label>
+    <label class="fld"><span>Rückgabe bis</span><input type="date" name="rueckgabe_bis" value="${esc(d.rueckgabe_bis)}"></label>
+  </div>
+  <div class="quick"><button type="button" class="link" data-g2>Garantie: 2 Jahre</button><button type="button" class="link" data-g0>Keine Garantie</button></div>
+  <label class="fld"><span>Steuerlich relevant</span><select name="steuer">${STEUER.map(([v, l]) => `<option value="${v}" ${v === (d.steuer || '') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+  <label class="fld lohnfld" ${d.steuer === 'Handwerker/haushaltsnah' ? '' : 'hidden'}><span>Lohn-/Arbeitskostenanteil (€)</span><input name="lohnanteil" inputmode="decimal" value="${esc(numDe(d.lohnanteil))}" placeholder="laut Rechnung"></label>
+  <p class="hint kb-hint" ${d.steuer === 'Kinderbetreuung' ? '' : 'hidden'}>Unter „Für wen“ das betreute Kind auswählen. Essensgeld ist nicht absetzbar – falls auf der Rechnung, bitte in der Notiz vermerken.</p>
+  <p class="hint warn bar-hint" hidden>Bar bezahlte Rechnungen erkennt das Finanzamt hier nicht an – bitte überweisen.</p>
+  <div class="toggles">
+    ${toggle('original_aufheben', 'Original aufheben', 'Thermopapier verblasst – Papierbon zusätzlich behalten', !!d.original_aufheben)}
+    ${toggle('inventar', 'Hausrat-Inventar', 'Für die Inventarliste der Versicherung', !!d.inventar)}
+    ${mode === 'edit' ? toggle('geprueft', 'Geprüft', 'Erkannte Daten kontrolliert', d.status !== 'zu prüfen') : ''}
+  </div>
+  <label class="fld"><span>Notiz</span><textarea name="notiz" rows="2" placeholder="optional">${esc(d.notiz)}</textarea></label>`;
+}
+
+function wireForm(root, excludeId) {
+  const f = n => root.querySelector(`[name="${n}"]`);
+  const chipsBox = $('[data-personen]', root);
+  const syncAll = () => {
+    const on = $$('[data-p].on', chipsBox).length;
+    $('[data-all]', chipsBox).classList.toggle('on', on === S.personen.length && on > 1);
+  };
+  chipsBox.addEventListener('click', e => {
+    const c = e.target.closest('.chip'); if (!c) return;
+    if (c.hasAttribute('data-all')) {
+      const all = $$('[data-p]', chipsBox).every(x => x.classList.contains('on'));
+      $$('[data-p]', chipsBox).forEach(x => x.classList.toggle('on', !all));
+    } else c.classList.toggle('on');
+    syncAll();
+  });
+  $('[data-g2]', root).onclick = () => { f('garantie_bis').value = addIso(f('datum').value || todayIso(), { years: 2 }); };
+  $('[data-g0]', root).onclick = () => { f('garantie_bis').value = ''; };
+  const barHint = () => { $('.bar-hint', root).hidden = !(f('steuer').value && f('zahlungsart').value === 'bar'); };
+  f('steuer').addEventListener('change', () => {
+    $('.lohnfld', root).hidden = f('steuer').value !== 'Handwerker/haushaltsnah';
+    $('.kb-hint', root).hidden = f('steuer').value !== 'Kinderbetreuung';
+    barHint();
+  });
+  f('bezahlt').addEventListener('change', () => { $('.faellig', root).hidden = f('bezahlt').checked; });
+  f('zahlungsart').addEventListener('change', barHint);
+  barHint();
+  let t;
+  const dupCheck = () => {
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      const box = $('.dup', root); const b = parseNum(f('betrag').value);
+      if (!f('datum').value || b == null) { box.hidden = true; return; }
+      const local = S.belege.filter(x => x.id !== excludeId && x.datum === f('datum').value && Math.abs(x.betrag - b) < 0.01);
+      box.hidden = !local.length;
+      if (local.length) box.innerHTML = `<b>Mögliches Duplikat:</b> ${local.map(x => `${esc(x.haendler)} · ${EUR.format(x.betrag)}${x.quelle === 'Gmail' ? ' (aus Gmail)' : ''}`).join(', ')} ist am selben Tag mit gleichem Betrag schon erfasst.`;
+    }, 300);
+  };
+  f('datum').addEventListener('change', dupCheck);
+  f('betrag').addEventListener('input', dupCheck);
+  dupCheck();
+}
+
+function readForm(root) {
+  const f = n => root.querySelector(`[name="${n}"]`);
+  const steuer = f('steuer').value;
+  const o = {
+    datum: f('datum').value,
+    betrag: parseNum(f('betrag').value),
+    haendler: f('haendler').value.trim(),
+    kategorie: f('kategorie').value,
+    personen: $$('[data-p].on', root).map(b => b.dataset.p),
+    produkte: f('produkte').value.split('\n').map(s => s.trim()).filter(Boolean),
+    zahlungsart: f('zahlungsart').value,
+    garantie_bis: f('garantie_bis').value,
+    rueckgabe_bis: f('rueckgabe_bis').value,
+    steuer: steuer,
+    lohnanteil: steuer === 'Handwerker/haushaltsnah' ? parseNum(f('lohnanteil').value) : null,
+    bezahlt: f('bezahlt').checked,
+    faellig_am: f('bezahlt').checked ? '' : f('faellig_am').value,
+    original_aufheben: f('original_aufheben').checked,
+    inventar: f('inventar').checked,
+    notiz: f('notiz').value.trim()
+  };
+  if (f('geprueft')) o.status = f('geprueft').checked ? 'geprüft' : 'zu prüfen';
+  return o;
+}
+function validate(o) {
+  if (!o.datum) return 'Bitte ein Datum angeben.';
+  if (o.betrag == null) return 'Bitte einen Betrag angeben.';
+  if (!o.haendler) return 'Bitte den Händler angeben.';
+  if (!o.personen.length) return 'Bitte auswählen, für wen der Kauf war.';
+  return '';
+}
+
+/* ───── Erfassen ───── */
+function renderErfassen() {
+  const offen = S.belege.filter(b => b.status === 'zu prüfen').length;
+  const unbez = S.belege.filter(b => b.bezahlt === false);
+  const ueberf = unbez.filter(b => b.faellig_am && b.faellig_am < todayIso()).length;
+  const recent = [...S.belege].sort((a, b) => (b.erfasst_am || '').localeCompare(a.erfasst_am || '')).slice(0, 3);
+  $('#main').innerHTML = `
+  <section class="card hero" data-start>
+    <h2>Neuen Beleg erfassen</h2>
+    <p class="muted" style="margin:0">Fotografiere den Kassenbon oder lade ein PDF hoch – mehrseitige Rechnungen Seite für Seite. Händler, Datum, Betrag und Produkte werden automatisch erkannt.</p>
+    <div class="btnrow">
+      <label class="btn primary big"><input type="file" accept="image/*" capture="environment" hidden data-in>${ICON.cam}Foto aufnehmen</label>
+      <label class="btn big"><input type="file" accept="image/*,application/pdf" multiple hidden data-in>${ICON.file}Datei / PDF</label>
+    </div>
+    <button class="link" data-manual>Ohne Foto erfassen</button>
+    ${S.hatKey ? '' : '<p class="hint warn">Kein API-Schlüssel hinterlegt – die automatische Erkennung ist aus. Unter „Mehr“ eintragen.</p>'}
+  </section>
+  <section class="card" data-capture hidden></section>
+  ${unbez.length ? `<button class="card notice" data-offen>${unbez.length} offene Rechnung${unbez.length > 1 ? 'en' : ''} · ${EUR.format(unbez.reduce((s, b) => s + b.betrag, 0))}${ueberf ? ` – davon ${ueberf} überfällig` : ''} →</button>` : ''}
+  ${offen ? `<button class="card notice" data-pruefen>${offen} Beleg${offen > 1 ? 'e' : ''} aus Gmail warten auf deine Prüfung →</button>` : ''}
+  ${recent.length ? `<p class="section-title">Zuletzt erfasst</p><div class="list" style="margin-top:8px">${recent.map(cardHtml).join('')}</div>` : ''}`;
+  $$('[data-in]').forEach(i => i.addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; if (files.length) handleFiles(files); }));
+  $('[data-manual]').onclick = () => { S.capture = { pages: [], run: 0, manual: true }; showCapture(); fillCapture({ personen: S.personen.slice(0, 1) }); };
+  const of = $('[data-offen]'); if (of) of.onclick = () => { Object.assign(S.filter, { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: true, steuer: false }); go('archiv'); };
+  const pr = $('[data-pruefen]'); if (pr) pr.onclick = () => { Object.assign(S.filter, { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: true, garantie: false, offen: false, steuer: false }); go('archiv'); };
+  wireList($('#main'));
+}
+
+async function handleFiles(files) {
+  const pdf = files.find(f => f.type === 'application/pdf');
+  let pages;
+  try {
+    pages = pdf ? [await prepareFile(pdf)] : await Promise.all(files.filter(f => f.type.startsWith('image/') || !f.type).map(prepareFile));
+  } catch (e) { toast(errMsg(e), 'err'); return; }
+  if (pdf && files.length > 1) toast('PDF übernommen – weitere Dateien ignoriert');
+  if (!pages.length) return;
+  S.capture = { pages, run: 0 };
+  showCapture();
+  analyzeCapture();
+}
+
+async function addPages(files) {
+  const cap = S.capture; if (!cap) return;
+  let neu;
+  try { neu = await Promise.all([...files].filter(f => f.type !== 'application/pdf').map(prepareFile)); } catch (e) { toast(errMsg(e), 'err'); return; }
+  if (!neu.length) return;
+  cap.pages.push(...neu);
+  renderPages();
+  analyzeCapture();
+}
+
+async function analyzeCapture() {
+  const cap = S.capture; if (!cap) return;
+  const slot = $('[data-formslot]');
+  const keepPers = slot && $('[data-personen]', slot) ? $$('[data-p].on', slot).map(b => b.dataset.p) : null;
+  if (!S.hatKey) { if (!cap.filled) { cap.filled = true; fillCapture({ personen: S.personen.slice(0, 1) }); } return; }
+  const run = ++cap.run;
+  setHead('Beleg wird gelesen …', `<span class="spin"></span> ${cap.pages.length > 1 ? cap.pages.length + ' Seiten werden' : 'Die KI liest Händler, Datum und Betrag'} ausgelesen`);
+  if (slot && !cap.filled) slot.innerHTML = '<div class="skel"></div><div class="skel" style="width:70%"></div><div class="skel" style="width:85%"></div>';
+  try {
+    const d = await api.analyzePages(cap.pages.map(p => ({ b64: p.b64, mime: p.mime })));
+    if (run !== cap.run || S.capture !== cap) return;
+    const data = fromAi(d);
+    if (keepPers && keepPers.length) data.personen = keepPers;
+    cap.filled = true; fillCapture(data);
+  } catch (e) {
+    if (run !== cap.run || S.capture !== cap) return;
+    toast('Erkennung fehlgeschlagen: ' + errMsg(e), 'err');
+    if (!cap.filled) { cap.filled = true; fillCapture({ personen: S.personen.slice(0, 1) }); }
+    else setHead('Bitte prüfen', 'Erkannte Werte kontrollieren und speichern');
+  }
+}
+
+function fromAi(d) {
+  const datum = d.datum || todayIso();
+  return {
+    datum, betrag: d.betrag, haendler: d.haendler || '', kategorie: d.kategorie,
+    personen: S.personen.slice(0, 1), produkte: d.produkte || [], zahlungsart: d.zahlungsart || 'unbekannt',
+    garantie_bis: d.garantie_relevant ? addIso(datum, { years: 2 }) : '',
+    rueckgabe_bis: d.rueckgabe_tage ? addIso(datum, { days: Number(d.rueckgabe_tage) }) : '',
+    steuer: d.steuer_art || '', lohnanteil: d.lohnanteil,
+    bezahlt: d.bezahlt !== false, faellig_am: d.bezahlt === false ? (d.faellig_am || '') : '',
+    original_aufheben: !!d.garantie_relevant, inventar: !!d.inventar_vorschlag,
+    _keinBeleg: d.ist_beleg === false
+  };
+}
+
+function setHead(title, sub) {
+  const box = $('[data-capture]'); if (!box) return;
+  $('h2', box).textContent = title; $('.capture-sub', box).innerHTML = sub;
+}
+
+function showCapture() {
+  $('[data-start]').hidden = true;
+  const box = $('[data-capture]'); box.hidden = false;
+  const cap = S.capture;
+  box.innerHTML = `<h2 style="font-size:17px">${cap.manual ? 'Beleg manuell erfassen' : 'Beleg wird gelesen …'}</h2>
+    <p class="muted capture-sub" style="margin:2px 0 0;font-size:13px">${cap.manual ? 'Ohne Bild, z. B. für eine Quittung, die du nicht mehr hast' : ''}</p>
+    <div class="pages" data-pages ${cap.manual ? 'hidden' : ''}></div>
+    <div data-formslot></div>`;
+  renderPages();
+  window.scrollTo(0, 0);
+}
+
+function renderPages() {
+  const cap = S.capture, box = $('[data-pages]'); if (!box || !cap) return;
+  const isPdf = cap.pages.length === 1 && cap.pages[0].mime === 'application/pdf';
+  box.innerHTML = cap.pages.map((p, i) => `<div class="pg">${p.preview ? `<img src="${p.preview}" alt="Seite ${i + 1}">` : '<span>PDF</span>'}
+      ${cap.pages.length > 1 ? `<button type="button" class="pgdel" data-del-page="${i}" aria-label="Seite entfernen">✕</button><small>${i + 1}</small>` : ''}</div>`).join('') +
+    (isPdf ? '' : `<label class="pg add"><input type="file" accept="image/*" capture="environment" hidden data-add-page><b>+</b><small>Seite</small></label>`);
+  const add = $('[data-add-page]', box);
+  if (add) add.addEventListener('change', e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) addPages(f); });
+  $$('[data-del-page]', box).forEach(b => b.onclick = () => { cap.pages.splice(+b.dataset.delPage, 1); if (!cap.pages.length) { S.capture = null; renderErfassen(); return; } renderPages(); analyzeCapture(); });
+}
+
+function fillCapture(data) {
+  const box = $('[data-capture]'); if (!box) return;
+  const cap = S.capture;
+  if (!cap.manual) setHead('Bitte prüfen', S.hatKey ? 'Erkannte Werte kontrollieren und speichern' : 'Bitte die Daten eintragen');
+  const slot = $('[data-formslot]', box);
+  slot.innerHTML = `${data._keinBeleg ? '<p class="hint warn">Das sieht nicht nach einem Kaufbeleg aus. Bitte prüfen.</p>' : ''}
+    <form onsubmit="return false">${formHtml(data, 'new')}</form>
+    <div class="actions"><button class="btn" data-cancel>Verwerfen</button><button class="btn primary" data-save>Speichern</button></div>`;
+  wireForm(slot, null);
+  $('[data-cancel]', slot).onclick = () => { S.capture = null; renderErfassen(); };
+  $('[data-save]', slot).onclick = async () => {
+    const o = readForm(slot); const err = validate(o); if (err) { toast(err, 'err'); return; }
+    busy('Wird gespeichert …');
+    try {
+      if (cap.pages.length === 1) { o.b64 = cap.pages[0].b64; o.mime = cap.pages[0].mime; }
+      else if (cap.pages.length > 1) { o.b64 = pagesToPdf(cap.pages); o.mime = 'application/pdf'; }
+      const saved = await api.saveReceipt(o);
+      S.belege.push(saved); updateDatalist(); S.capture = null;
+      busy(false); toast('Beleg gespeichert ✓'); renderErfassen();
+    } catch (e) { busy(false); toast('Speichern fehlgeschlagen: ' + errMsg(e), 'err'); }
+  };
+}
+
+/* Mehrere JPEG-Seiten zu einem PDF zusammenfügen (ohne externe Bibliothek) */
+function pagesToPdf(pages) {
+  const enc = new TextEncoder(), parts = [], offs = [];
+  let len = 0;
+  const push = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (id, body) => { offs[id] = len; push(id + ' 0 obj\n' + body + '\nendobj\n'); };
+  const n = pages.length, total = 2 + n * 3, k = 0.36;
+  push(new Uint8Array([37, 80, 68, 70, 45, 49, 46, 52, 10, 37, 226, 227, 207, 211, 10]));
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Kids [${pages.map((_, i) => (3 + i * 3) + ' 0 R').join(' ')}] /Count ${n} >>`);
+  pages.forEach((p, i) => {
+    const pid = 3 + i * 3, cid = pid + 1, iid = pid + 2;
+    const W = (p.w * k).toFixed(2), H = (p.h * k).toFixed(2);
+    obj(pid, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /XObject << /Im${i} ${iid} 0 R >> >> /Contents ${cid} 0 R >>`);
+    const c = `q ${W} 0 0 ${H} 0 0 cm /Im${i} Do Q`;
+    obj(cid, `<< /Length ${c.length} >>\nstream\n${c}\nendstream`);
+    const bin = atob(p.b64), jpg = new Uint8Array(bin.length);
+    for (let j = 0; j < bin.length; j++) jpg[j] = bin.charCodeAt(j);
+    offs[iid] = len;
+    push(`${iid} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`);
+    push(jpg); push('\nendstream\nendobj\n');
+  });
+  const xref = len;
+  let x = `xref\n0 ${total + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= total; i++) x += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+  push(x + `trailer\n<< /Size ${total + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  const all = new Uint8Array(len); let o = 0;
+  parts.forEach(pt => { all.set(pt, o); o += pt.length; });
+  let str = '';
+  for (let i = 0; i < all.length; i += 0x8000) str += String.fromCharCode.apply(null, all.subarray(i, i + 0x8000));
+  return btoa(str);
+}
+
+async function prepareFile(file) {
+  if (file.type === 'application/pdf') {
+    if (file.size > 20 * 1024 * 1024) throw new Error('Das PDF ist zu groß (max. 20 MB).');
+    return { b64: await fileToB64(file), mime: 'application/pdf', preview: null };
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Das Bild konnte nicht geladen werden.')); i.src = url; });
+    const max = 2000; const sc = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * sc); c.height = Math.round(img.naturalHeight * sc);
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    const dataUrl = c.toDataURL('image/jpeg', 0.85);
+    return { b64: dataUrl.split(',')[1], mime: 'image/jpeg', preview: dataUrl, w: c.width, h: c.height };
+  } finally { URL.revokeObjectURL(url); }
+}
+function fileToB64(file) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = () => rej(new Error('Datei konnte nicht gelesen werden.')); r.readAsDataURL(file); });
+}
+
+/* ───── Archiv ───── */
+function range(z) {
+  const t = new Date(), y = t.getFullYear();
+  if (z === 'monat') return [toIso(new Date(y, t.getMonth(), 1)), null];
+  if (z === '3m') return [toIso(new Date(y, t.getMonth() - 2, 1)), null];
+  if (z === 'jahr') return [`${y}-01-01`, null];
+  if (z === 'vorjahr') return [`${y - 1}-01-01`, `${y - 1}-12-31`];
+  if (/^\d{4}$/.test(z)) return [`${z}-01-01`, `${z}-12-31`];
+  if (/^\d{4}-\d{2}$/.test(z)) return [`${z}-01`, `${z}-31`];
+  return [null, null];
+}
+function filtered() {
+  const f = S.filter, heute = todayIso();
+  const terms = f.q.toLowerCase().split(/\s+/).filter(Boolean);
+  const [from, to] = range(f.zeitraum);
+  return S.belege.filter(b => {
+    if (from && b.datum < from) return false;
+    if (to && b.datum > to) return false;
+    if (f.kat && b.kategorie !== f.kat) return false;
+    if (f.person && !personList(b.personen).includes(f.person)) return false;
+    if (f.pruefen && b.status !== 'zu prüfen') return false;
+    if (f.garantie && !(b.garantie_bis && b.garantie_bis >= heute)) return false;
+    if (f.offen && b.bezahlt !== false) return false;
+    if (f.steuer && !b.steuer) return false;
+    if (terms.length) {
+      const hay = [b.haendler, b.produkte, b.notiz, b.kategorie, b.personen, numDe(b.betrag), fmtDate(b.datum)].join(' ').toLowerCase();
+      return terms.every(t => hay.includes(t));
+    }
+    return true;
+  }).sort((a, b) => (b.datum || '').localeCompare(a.datum || '') || (b.erfasst_am || '').localeCompare(a.erfasst_am || ''));
+}
+function zeitraumOptions() {
+  const opts = [['alle', 'Gesamter Zeitraum'], ['monat', 'Dieser Monat'], ['3m', 'Letzte 3 Monate'], ['jahr', 'Dieses Jahr'], ['vorjahr', 'Letztes Jahr']];
+  const z = S.filter.zeitraum;
+  if (/^\d{4}$/.test(z)) opts.push([z, 'Jahr ' + z]);
+  if (/^\d{4}-\d{2}$/.test(z)) opts.push([z, MONATE_LANG[+z.slice(5) - 1] + ' ' + z.slice(0, 4)]);
+  return opts.map(([v, l]) => `<option value="${v}" ${v === z ? 'selected' : ''}>${l}</option>`).join('');
+}
+function renderArchiv() {
+  const f = S.filter;
+  const offen = S.belege.filter(b => b.status === 'zu prüfen').length;
+  const unbezahlt = S.belege.filter(b => b.bezahlt === false).length;
+  $('#main').innerHTML = `
+  <div class="search">${ICON.search}<input type="search" placeholder="Händler, Produkt, Notiz, Betrag …" value="${esc(f.q)}" data-q></div>
+  <div class="filters">
+    <select data-f="zeitraum">${zeitraumOptions()}</select>
+    <select data-f="kat"><option value="">Alle Kategorien</option>${S.kategorien.map(k => `<option ${k === f.kat ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
+    <select data-f="person"><option value="">Alle Personen</option>${S.personen.map(p => `<option ${p === f.person ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
+  </div>
+  <div class="fchips">
+    <button class="chip ${f.pruefen ? 'on' : ''}" data-c="pruefen">Zu prüfen${offen ? ' (' + offen + ')' : ''}</button>
+    <button class="chip ${f.offen ? 'on' : ''}" data-c="offen">Unbezahlt${unbezahlt ? ' (' + unbezahlt + ')' : ''}</button>
+    <button class="chip ${f.steuer ? 'on' : ''}" data-c="steuer">Steuerrelevant</button>
+    <button class="chip ${f.garantie ? 'on' : ''}" data-c="garantie">Garantie aktiv</button>
+  </div>
+  <div data-results></div>`;
+  $('[data-q]').addEventListener('input', e => { f.q = e.target.value; renderResults(); });
+  $$('[data-f]').forEach(s => s.addEventListener('change', e => { f[e.target.dataset.f] = e.target.value; renderResults(); }));
+  $$('[data-c]').forEach(c => c.addEventListener('click', () => { f[c.dataset.c] = !f[c.dataset.c]; c.classList.toggle('on'); renderResults(); }));
+  renderResults();
+}
+function renderResults() {
+  const list = filtered();
+  const sum = list.reduce((s, b) => s + b.betrag, 0);
+  $('#subtitle').textContent = `${list.length} Beleg${list.length === 1 ? '' : 'e'} · ${EUR.format(sum)}`;
+  const box = $('[data-results]');
+  if (!list.length) {
+    box.innerHTML = `<div class="empty">${S.belege.length ? 'Keine Belege für diese Suche.' : 'Noch keine Belege. Leg los unter „Erfassen“.'}</div>`;
+    return;
+  }
+  const groups = [];
+  list.forEach(b => {
+    const k = (b.datum || '').slice(0, 7);
+    let g = groups[groups.length - 1];
+    if (!g || g.k !== k) { g = { k, items: [], sum: 0 }; groups.push(g); }
+    g.items.push(b); g.sum += b.betrag;
+  });
+  box.innerHTML = groups.map(g => `<div class="month"><span>${g.k ? MONATE_LANG[+g.k.slice(5) - 1] + ' ' + g.k.slice(0, 4) : 'Ohne Datum'}</span><span>${EUR.format(g.sum)}</span></div>
+    <div class="list">${g.items.map(cardHtml).join('')}</div>`).join('');
+  wireList(box);
+}
+function cardHtml(b) {
+  const heute = todayIso(); const badges = [];
+  if (b.status === 'zu prüfen') badges.push('<span class="badge warn">Zu prüfen</span>');
+  if (b.garantie_bis && b.garantie_bis >= heute) badges.push(`<span class="badge ok">Garantie bis ${fmtDate(b.garantie_bis)}</span>`);
+  if (b.rueckgabe_bis && b.rueckgabe_bis >= heute) badges.push(`<span class="badge warn">Rückgabe bis ${fmtDate(b.rueckgabe_bis)}</span>`);
+  if (b.bezahlt === false) badges.push(`<span class="badge warn">Offen${b.faellig_am ? ' · fällig ' + fmtDate(b.faellig_am) : ''}</span>`);
+  if (b.steuer) badges.push(`<span class="badge">${esc(STEUER_KURZ[b.steuer] || 'Steuer')}</span>`);
+  if (b.original_aufheben) badges.push('<span class="badge">Original</span>');
+  if (b.inventar) badges.push('<span class="badge">Inventar</span>');
+  if (b.quelle === 'Gmail') badges.push('<span class="badge">Gmail</span>');
+  const prod = prodList(b.produkte);
+  return `<button class="item" data-id="${esc(b.id)}"><span class="dot" style="background:${katColor(b.kategorie)}"></span>
+    <span class="ibody">
+      <span class="irow"><b>${esc(b.haendler || 'Unbekannt')}</b><b class="amt">${EUR.format(b.betrag || 0)}</b></span>
+      <span class="irow sub"><span>${fmtDate(b.datum)} · ${esc(b.kategorie)}</span><span>${esc(personText(b.personen))}</span></span>
+      ${prod.length ? `<span class="prod">${esc(prod.join(', '))}</span>` : ''}
+      ${badges.length ? `<span class="badges">${badges.join('')}</span>` : ''}
+    </span></button>`;
+}
+function wireList(root) { $$('.item[data-id]', root).forEach(el => el.onclick = () => openDetail(el.dataset.id)); }
+
+/* ───── Detail ───── */
+function openDetail(id) {
+  const b = S.belege.find(x => x.id === id); if (!b) return;
+  const m = $('#modal');
+  m.innerHTML = `<div class="modal"><div class="sheet">
+    <header><h3>${esc(b.haendler || 'Beleg')}</h3><button data-close aria-label="Schließen">✕</button></header>
+    <div class="sbody">
+      <div class="preview" data-prev>${b.datei_id ? '<div class="skel" style="height:160px;border-radius:10px"></div>' : '<p class="muted">Kein Bild gespeichert</p>'}</div>
+      <form onsubmit="return false">${formHtml(b, 'edit')}</form>
+      <p class="meta">Erfasst am ${esc(fmtDate((b.erfasst_am || '').slice(0, 10)))} · Quelle: ${esc(b.quelle || '–')}</p>
+    </div>
+    <footer><button class="btn danger" data-del>Löschen</button><a class="btn" data-drive hidden target="_blank">In Drive</a><button class="btn primary" data-save>Speichern</button></footer>
+  </div></div>`;
+  const close = () => { m.innerHTML = ''; document.body.style.overflow = ''; };
+  document.body.style.overflow = 'hidden';
+  $('.modal', m).addEventListener('click', e => { if (e.target.classList.contains('modal')) close(); });
+  $('[data-close]', m).onclick = close;
+  wireForm($('.sbody', m), b.id);
+  if (b.datei_id) {
+    api.getFileData(id).then(r => {
+      const prev = $('[data-prev]', m); if (!prev || !r) return;
+      const a = $('[data-drive]', m); a.href = r.url; a.hidden = false;
+      if (r.b64) {
+        prev.innerHTML = `<img src="data:${r.mime};base64,${r.b64}" alt="Beleg">`;
+        $('img', prev).onclick = e => e.target.classList.toggle('zoom');
+      } else prev.innerHTML = `<a class="btn" href="${esc(r.url)}" target="_blank">${ICON.file} PDF öffnen</a>`;
+    }).catch(() => { const prev = $('[data-prev]', m); if (prev) prev.innerHTML = '<p class="muted">Bild konnte nicht geladen werden</p>'; });
+  }
+  $('[data-save]', m).onclick = async () => {
+    const o = readForm($('.sbody', m)); const err = validate(o); if (err) { toast(err, 'err'); return; }
+    busy('Wird gespeichert …');
+    try {
+      const u = await api.updateReceipt(id, o);
+      const i = S.belege.findIndex(x => x.id === id); S.belege[i] = u; updateDatalist();
+      busy(false); close(); toast('Änderungen gespeichert ✓'); go(S.tab);
+    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+  };
+  $('[data-del]', m).onclick = async () => {
+    if (!confirm('Diesen Beleg wirklich löschen? Das Bild wandert in den Drive-Papierkorb.')) return;
+    busy('Wird gelöscht …');
+    try {
+      await api.deleteReceipt(id);
+      S.belege = S.belege.filter(x => x.id !== id);
+      busy(false); close(); toast('Beleg gelöscht'); go(S.tab);
+    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+  };
+}
+
+/* ───── Übersicht ───── */
+function years() {
+  const y = new Set(S.belege.map(b => +(b.datum || '').slice(0, 4)).filter(Boolean));
+  y.add(new Date().getFullYear());
+  return [...y].sort((a, b) => b - a);
+}
+function renderDashboard() {
+  const D = S.dash, now = new Date();
+  const rows = S.belege.filter(b => (b.datum || '').startsWith(String(D.jahr)) && (!D.person || personList(b.personen).includes(D.person)));
+  const byMonth = Array.from({ length: 12 }, () => ({}));
+  rows.forEach(b => { const m = +b.datum.slice(5, 7) - 1; byMonth[m][b.kategorie] = (byMonth[m][b.kategorie] || 0) + b.betrag; });
+  const total = rows.reduce((s, b) => s + b.betrag, 0);
+  const monate = D.jahr === now.getFullYear() ? now.getMonth() + 1 : 12;
+  const scope = D.monat == null ? rows : rows.filter(b => +b.datum.slice(5, 7) - 1 === D.monat);
+  const scopeSum = scope.reduce((s, b) => s + b.betrag, 0);
+  const byKat = {}; scope.forEach(b => byKat[b.kategorie] = (byKat[b.kategorie] || 0) + b.betrag);
+  const kats = Object.entries(byKat).sort((a, b) => b[1] - a[1]);
+  const byH = {}; scope.forEach(b => { const k = b.haendler || 'Unbekannt'; byH[k] = (byH[k] || 0) + b.betrag; });
+  const topH = Object.entries(byH).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const heute = todayIso(), bald = addIso(heute, { days: 90 });
+  const gar = S.belege.filter(b => b.garantie_bis && b.garantie_bis >= heute && b.garantie_bis <= bald).sort((a, b) => a.garantie_bis.localeCompare(b.garantie_bis)).slice(0, 8);
+  const unbez = S.belege.filter(b => b.bezahlt === false).sort((a, b) => (a.faellig_am || '9999').localeCompare(b.faellig_am || '9999'));
+  const scopeLabel = D.monat == null ? String(D.jahr) : MONATE_LANG[D.monat] + ' ' + D.jahr;
+  const usedKats = [...new Set(rows.map(b => b.kategorie))];
+
+  $('#main').innerHTML = `
+  <div class="dashsel">
+    <select data-d="jahr">${years().map(y => `<option ${y === D.jahr ? 'selected' : ''}>${y}</option>`).join('')}</select>
+    <select data-d="person"><option value="">Alle Personen</option>${S.personen.map(p => `<option ${p === D.person ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><small>Ausgaben ${D.jahr}</small><b>${EUR0.format(total)}</b></div>
+    <div class="kpi"><small>Ø pro Monat</small><b>${EUR0.format(total / monate)}</b></div>
+    <div class="kpi"><small>Belege</small><b>${rows.length}</b></div>
+  </div>
+  <section class="card chart">
+    <h3><span>Ausgaben pro Monat</span>${D.monat != null ? '<button class="link" data-allm>Ganzes Jahr</button>' : '<small>Monat antippen</small>'}</h3>
+    ${chartSvg(byMonth, D.monat)}
+    <div class="legend">${usedKats.map(k => `<span><i style="background:${katColor(k)}"></i>${esc(k)}</span>`).join('')}</div>
+  </section>
+  <section class="card">
+    <h3><span>Nach Kategorie · ${esc(scopeLabel)}</span><small>${EUR.format(scopeSum)}</small></h3>
+    ${kats.length ? kats.map(([k, v]) => `<button class="katrow" data-kat="${esc(k)}">
+        <span class="irow"><span>${esc(k)}</span><b class="amt">${EUR.format(v)} <small>${Math.round(v / scopeSum * 100)} %</small></b></span>
+        <div class="bar"><i style="width:${(v / kats[0][1] * 100).toFixed(1)}%;background:${katColor(k)}"></i></div></button>`).join('')
+      : '<p class="muted">Keine Ausgaben in diesem Zeitraum.</p>'}
+  </section>
+  ${topH.length ? `<section class="card"><h3><span>Top-Händler · ${esc(scopeLabel)}</span></h3>
+    ${topH.map(([h, v]) => `<div class="mini"><span>${esc(h)}</span><b>${EUR.format(v)}</b></div>`).join('')}</section>` : ''}
+  ${unbez.length ? `<section class="card"><h3><span>Offene Rechnungen</span><small>${EUR.format(unbez.reduce((s, b) => s + b.betrag, 0))}</small></h3>
+    ${unbez.map(b => `<button class="katrow" data-open="${esc(b.id)}"><span class="irow"><span>${esc(b.haendler)}${b.faellig_am ? ` <small style="color:${b.faellig_am < heute ? 'var(--danger)' : 'var(--muted)'}">fällig ${fmtDate(b.faellig_am)}</small>` : ''}</span><b class="amt">${EUR.format(b.betrag)}</b></span></button>`).join('')}</section>` : ''}
+  <section class="card"><h3><span>Garantie endet in 90 Tagen</span></h3>
+    ${gar.length ? `<div>${gar.map(b => `<button class="katrow" data-open="${esc(b.id)}"><span class="irow"><span>${esc(prodList(b.produkte)[0] || b.haendler)}</span><b class="amt">${fmtDate(b.garantie_bis)}</b></span></button>`).join('')}</div>`
+      : '<p class="muted" style="margin:0">Keine Garantie läuft demnächst ab.</p>'}
+  </section>`;
+
+  $$('[data-d]').forEach(s => s.addEventListener('change', e => {
+    const k = e.target.dataset.d; D[k] = k === 'jahr' ? +e.target.value : e.target.value; if (k === 'jahr') D.monat = null; renderDashboard();
+  }));
+  $$('[data-m]').forEach(r => r.addEventListener('click', () => { const m = +r.dataset.m; D.monat = D.monat === m ? null : m; renderDashboard(); }));
+  const am = $('[data-allm]'); if (am) am.onclick = () => { D.monat = null; renderDashboard(); };
+  $$('[data-kat]').forEach(r => r.onclick = () => {
+    Object.assign(S.filter, { q: '', kat: r.dataset.kat, person: D.person, pruefen: false, garantie: false, offen: false, steuer: false,
+      zeitraum: D.monat == null ? String(D.jahr) : `${D.jahr}-${pad(D.monat + 1)}` });
+    go('archiv');
+  });
+  $$('[data-open]').forEach(r => r.onclick = () => openDetail(r.dataset.open));
+}
+
+function chartSvg(byMonth, sel) {
+  const W = 360, H = 200, pl = 4, pr = 4, pt = 22, pb = 20;
+  const order = [...S.kategorien, ...new Set(byMonth.flatMap(o => Object.keys(o)).filter(k => !S.kategorien.includes(k)))];
+  const totals = byMonth.map(o => Object.values(o).reduce((a, b) => a + b, 0));
+  const max = Math.max(...totals, 1);
+  const bw = (W - pl - pr) / 12, ch = H - pt - pb;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ausgaben pro Monat">`;
+  [0.5, 1].forEach(f => { const y = pt + ch * (1 - f); s += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-dasharray="3 3"/>`; });
+  s += `<text x="${pl}" y="${pt - 6}">${EUR0.format(max)}</text>`;
+  byMonth.forEach((o, i) => {
+    const x = pl + i * bw + bw * 0.18, w = bw * 0.64;
+    const dim = sel != null && sel !== i;
+    let y = H - pb;
+    order.forEach(k => {
+      const v = o[k]; if (!v) return;
+      const h = Math.max(v / max * ch, 1.5); y -= h;
+      s += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${katColor(k)}" opacity="${dim ? 0.3 : 1}"/>`;
+    });
+    if (sel === i && totals[i]) s += `<text class="sel" x="${(x + w / 2).toFixed(1)}" y="${Math.max(y - 5, 10).toFixed(1)}" text-anchor="middle">${EUR0.format(totals[i])}</text>`;
+    s += `<text x="${(x + w / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" class="${sel === i ? 'sel' : ''}">${MONATE[i].slice(0, 1)}</text>`;
+    s += `<rect data-m="${i}" x="${(pl + i * bw).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" fill="transparent" style="cursor:pointer"/>`;
+  });
+  return s + '</svg>';
+}
+
+/* ───── Mehr ───── */
+function renderMehr() {
+  const jahre = years();
+  $('#main').innerHTML = `
+  <section class="card">
+    <h3><span>Rechnungen aus Gmail</span></h3>
+    <p class="muted" style="margin:0;font-size:14px">Jeden Morgen um 6 Uhr sucht die App automatisch nach neuen Rechnungsmails und legt sie als „zu prüfen“ ab.</p>
+    <button class="btn block" style="margin-top:12px" data-gmail>Jetzt nach Rechnungen suchen</button>
+  </section>
+  <section class="card">
+    <h3><span>Exporte</span></h3>
+    <label class="fld" style="margin-top:0"><span>Jahr</span><select data-ex-jahr>${jahre.map(y => `<option ${y === new Date().getFullYear() - (new Date().getMonth() < 6 ? 1 : 0) ? 'selected' : ''}>${y}</option>`).join('')}</select></label>
+    <div style="display:grid;gap:8px;margin-top:12px">
+      <button class="btn block" data-ex="exportSteuer">Steuer: Handwerker & Kinderbetreuung (PDF + CSV)</button>
+      <button class="btn block" data-ex="exportJahr">Alle Belege des Jahres (CSV)</button>
+      <button class="btn block" data-ex="exportInventar">Hausrat-Inventarliste (PDF + CSV)</button>
+    </div>
+    <div data-exres></div>
+  </section>
+  <section class="card">
+    <h3><span>Einstellungen</span></h3>
+    <label class="fld" style="margin-top:0"><span>Personen <small>– eine pro Zeile, die erste ist die Vorauswahl</small></span><textarea rows="4" data-s="personen">${esc(S.personen.join('\n'))}</textarea></label>
+    <label class="fld"><span>Kategorien <small>– eine pro Zeile</small></span><textarea rows="7" data-s="kategorien">${esc(S.kategorien.join('\n'))}</textarea></label>
+    <label class="fld"><span>Claude API-Schlüssel ${S.hatKey ? '<small>– hinterlegt ✓</small>' : ''}</span><input type="password" autocomplete="off" data-s="apiKey" placeholder="${S.hatKey ? 'Nur zum Ändern neu eingeben' : 'sk-ant-…'}"></label>
+    <label class="fld"><span>KI-Modell</span><input data-s="model" value="${esc(S.model)}"></label>
+    <label class="fld"><span>GitHub-Repository für Updates</span><input data-s="githubRepo" value="${esc(S.githubRepo)}" placeholder="benutzername/belegarchiv" autocapitalize="off" autocomplete="off"></label>
+    <div class="grid2" style="margin-top:14px"><button class="btn" data-test>Verbindung testen</button><button class="btn primary" data-sset>Speichern</button></div>
+  </section>
+  <section class="card">
+    <h3><span>App-Version</span><small>${esc(S.appVersion)}</small></h3>
+    <div data-upd><button class="btn block" data-upcheck ${S.githubRepo ? '' : 'disabled'}>Nach Updates suchen</button>
+    ${S.githubRepo ? '' : '<p class="hint">Trage unten bei den Einstellungen dein GitHub-Repository ein.</p>'}</div>
+  </section>
+  <section class="card">
+    <h3><span>Daten in Google Drive</span></h3>
+    <div class="reslinks"><a class="btn" href="${esc(S.ordnerUrl)}" target="_blank">Belegordner</a><a class="btn" href="${esc(S.tabelleUrl)}" target="_blank">Datentabelle</a></div>
+  </section>`;
+
+  $('[data-gmail]').onclick = async () => {
+    if (!S.hatKey) { toast('Bitte zuerst den API-Schlüssel hinterlegen.', 'err'); return; }
+    busy('Postfach wird durchsucht …');
+    try {
+      const r = await api.runGmailImport();
+      const init = await api.getInit(); S.belege = init.belege; updateDatalist();
+      busy(false); toast(r.importiert ? `${r.importiert} Rechnung(en) importiert – bitte prüfen` : 'Keine neuen Rechnungen gefunden');
+    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+  };
+  $$('[data-ex]').forEach(b => b.onclick = async () => {
+    const fn = b.dataset.ex, jahr = $('[data-ex-jahr]').value;
+    busy('Export wird erstellt …');
+    try {
+      const r = fn === 'exportInventar' ? await api.exportInventar() : await api[fn](jahr);
+      busy(false);
+      $('[data-exres]').innerHTML = `<p class="hint">${r.anzahl} Beleg(e) exportiert, gespeichert im Drive-Ordner „Exporte“.</p>
+        <div class="reslinks">${r.pdfUrl ? `<a class="btn primary" href="${esc(r.pdfUrl)}" target="_blank">PDF öffnen</a>` : ''}${r.csvUrl ? `<a class="btn" href="${esc(r.csvUrl)}" target="_blank">CSV öffnen</a>` : ''}</div>`;
+    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+  });
+  const lines = s => $(`[data-s="${s}"]`).value.split('\n').map(x => x.trim()).filter(Boolean);
+  $('[data-sset]').onclick = async () => {
+    const p = lines('personen'), k = lines('kategorien');
+    if (!p.length || !k.length) { toast('Mindestens eine Person und eine Kategorie angeben.', 'err'); return; }
+    busy('Wird gespeichert …');
+    try {
+      const r = await api.saveSettings({ personen: p, kategorien: k, apiKey: $('[data-s="apiKey"]').value, model: $('[data-s="model"]').value, githubRepo: $('[data-s="githubRepo"]').value });
+      Object.assign(S, r); busy(false); toast('Einstellungen gespeichert ✓'); renderMehr();
+    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+  };
+  const uc = $('[data-upcheck]');
+  if (uc) uc.onclick = async () => {
+    const box = $('[data-upd]');
+    box.innerHTML = '<p class="muted"><span class="spin"></span> Suche nach Updates …</p>';
+    try {
+      const r = await api.checkUpdate();
+      if (!r.verfuegbar) { box.innerHTML = `<p class="hint">Du hast die neueste Version (${esc(r.aktuell)}).</p>`; return; }
+      box.innerHTML = `<p style="margin:0 0 4px"><b>Version ${esc(r.neu)} ist verfügbar</b></p>
+        ${r.notes ? `<p class="muted" style="margin:0 0 10px;font-size:14px;white-space:pre-line">${esc(r.notes)}</p>` : ''}
+        <button class="btn primary block" data-upgo>Jetzt aktualisieren</button>`;
+      $('[data-upgo]').onclick = async () => {
+        busy('Update wird installiert …');
+        try {
+          const u = await api.runUpdate();
+          busy(false);
+          box.innerHTML = `<p class="hint">Version ${esc(u.version)} ist installiert. Bitte die App neu öffnen.</p>
+            <a class="btn primary block" href="${esc(u.url)}" target="_top" style="margin-top:10px">Neu laden</a>`;
+        } catch (e) { busy(false); box.innerHTML = `<p class="hint warn">${esc(errMsg(e))}</p>`; }
+      };
+    } catch (e) { box.innerHTML = `<p class="hint warn">${esc(errMsg(e))}</p>`; }
+  };
+  $('[data-test]').onclick = async () => {
+    busy('Verbindung wird getestet …');
+    try { await api.testApi(); busy(false); toast('Verbindung zur Claude API funktioniert ✓'); }
+    catch (e) { busy(false); toast(errMsg(e), 'err'); }
+  };
+}
+
+/* ───── Start ───── */
+api.getInit().then(r => {
+  Object.assign(S, r);
+  updateDatalist();
+  go('erfassen');
+}).catch(e => {
+  $('#main').innerHTML = `<div class="card"><h2 style="font-size:18px">Noch nicht eingerichtet</h2><p class="muted">${esc(errMsg(e))}</p></div>`;
+});
+</script>
+</body>
+</html>
