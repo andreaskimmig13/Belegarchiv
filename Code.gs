@@ -7,12 +7,13 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.4.2';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
   EXPORT_FOLDER: 'Exporte',
   SHEET_NAME: 'Belege',
+  SHEET_TITLE: 'Belegarchiv – Datenbank',
   GMAIL_LABEL: 'Belegarchiv/importiert',
   GMAIL_LABEL_SEARCH: 'belegarchiv-importiert',
   DEFAULT_MODEL: 'claude-sonnet-5-5',
@@ -50,11 +51,22 @@ const DEFAULT_KATEGORIEN = [
 function setup() {
   const p = props_();
 
-  let folder = null;
+  let folder = null, uebernommen = false;
   const fid = p.getProperty('ROOT_FOLDER_ID');
-  if (fid) { try { folder = DriveApp.getFolderById(fid); } catch (e) { folder = null; } }
+  if (fid) { try { folder = DriveApp.getFolderById(fid); if (folder.isTrashed()) folder = null; } catch (e) { folder = null; } }
   if (!folder) {
-    folder = DriveApp.createFolder(CFG.ROOT_FOLDER);
+    // Bestehenden Belegarchiv-Ordner suchen (z. B. nach einem Umzug in ein neues Skript-Projekt)
+    let kandidat = null;
+    const it = DriveApp.getFoldersByName(CFG.ROOT_FOLDER);
+    while (it.hasNext()) {
+      const f = it.next();
+      if (f.isTrashed()) continue;
+      if (f.getFilesByName(CFG.SHEET_TITLE).hasNext()) { folder = f; break; }
+      if (!kandidat) kandidat = f;
+    }
+    if (!folder) folder = kandidat;
+    if (folder) uebernommen = true;
+    else folder = DriveApp.createFolder(CFG.ROOT_FOLDER);
     p.setProperty('ROOT_FOLDER_ID', folder.getId());
   }
 
@@ -62,8 +74,15 @@ function setup() {
   const sid = p.getProperty('SPREADSHEET_ID');
   if (sid) { try { ss = SpreadsheetApp.openById(sid); } catch (e) { ss = null; } }
   if (!ss) {
-    ss = SpreadsheetApp.create('Belegarchiv – Datenbank');
-    DriveApp.getFileById(ss.getId()).moveTo(folder);
+    const it = folder.getFilesByName(CFG.SHEET_TITLE);
+    while (it.hasNext()) {
+      const f = it.next();
+      if (!f.isTrashed() && f.getMimeType() === MimeType.GOOGLE_SHEETS) { ss = SpreadsheetApp.openById(f.getId()); uebernommen = true; break; }
+    }
+    if (!ss) {
+      ss = SpreadsheetApp.create(CFG.SHEET_TITLE);
+      DriveApp.getFileById(ss.getId()).moveTo(folder);
+    }
     p.setProperty('SPREADSHEET_ID', ss.getId());
   }
 
@@ -89,7 +108,9 @@ function setup() {
 
   CalendarApp.getDefaultCalendar(); // Kalender-Berechtigung abfragen
 
-  Logger.log('Fertig eingerichtet.');
+  Logger.log(uebernommen
+    ? 'Fertig. Bestehende Daten übernommen: ' + Math.max(sh.getLastRow() - 1, 0) + ' Belege.'
+    : 'Fertig eingerichtet (neues Archiv angelegt).');
   Logger.log('Drive-Ordner: ' + folder.getUrl());
   Logger.log('Tabelle: ' + ss.getUrl());
 }
