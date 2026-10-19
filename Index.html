@@ -961,18 +961,23 @@ function openDups() {
   const m = $('#modal');
   const close = () => { m.innerHTML = ''; document.body.style.overflow = ''; };
   document.body.style.overflow = 'hidden';
-  const row = (b, gi, i) => `<label class="tgl" style="align-items:flex-start">
+  const row = (b, gi, i) => `<div class="duprow" style="border-bottom:1px solid var(--line);padding:4px 0 10px">
+      <label class="tgl" style="align-items:flex-start;border:0;padding-bottom:4px">
       <input type="radio" name="g${gi}" value="${esc(b.id)}" ${i === 0 ? 'checked' : ''} style="display:inline;margin-top:4px;accent-color:var(--accent)">
       <span class="tl"><b>${esc(b.haendler || 'Unbekannt')} · ${EUR.format(b.betrag)}</b>
       <small>${fmtDate(b.datum)} · ${esc(b.quelle || '–')}${b.dokumentart ? ' · ' + esc(({ rechnung: 'Rechnung', quittung: 'Quittung', zahlungsbestaetigung: 'Zahlungsbestätigung', bestellbestaetigung: 'Bestellbestätigung' })[b.dokumentart] || b.dokumentart) : ''}${b.status === 'zu prüfen' ? ' · zu prüfen' : ''}</small>
-      ${prodList(b.produkte).length ? `<small>${esc(prodList(b.produkte).join(', '))}</small>` : ''}</span></label>`;
+      ${prodList(b.produkte).length ? `<small>${esc(prodList(b.produkte).join(', '))}</small>` : ''}
+      ${b.notiz ? `<small>${esc(b.notiz)}</small>` : ''}</span></label>
+      ${b.datei_id ? `<button type="button" class="link" style="margin-left:54px;font-size:13px" data-view="${esc(b.id)}">Beleg ansehen</button><div data-pv="${esc(b.id)}"></div>` : '<small class="muted" style="margin-left:54px">Kein Bild gespeichert</small>'}
+    </div>`;
   m.innerHTML = `<div class="modal"><div class="sheet">
     <header><h3>Mögliche Duplikate</h3><button data-close aria-label="Schließen">✕</button></header>
     <div class="sbody">
-      ${groups.length ? `<p class="hint">Pro Gruppe den Beleg wählen, der bleiben soll. „Zusammenführen“ löscht die übrigen samt Datei.</p>
+      ${groups.length ? `<p class="hint">Pro Gruppe den Beleg wählen, der bleiben soll. „Zusammenführen“ löscht die übrigen samt Datei, „Alle löschen“ entfernt die ganze Gruppe.</p>
         ${groups.map((g, gi) => `<div class="card" data-grp="${gi}" style="margin:12px 0;padding:4px 14px 12px">
           ${g.map((b, i) => row(b, gi, i)).join('')}
           <div class="grid2" style="margin-top:12px"><button class="btn" data-keep="${gi}">Kein Duplikat</button><button class="btn primary" data-merge="${gi}">Zusammenführen</button></div>
+          <button class="btn danger block" style="margin-top:8px" data-delall="${gi}">Alle löschen – kein echter Kauf</button>
         </div>`).join('')}` : '<div class="empty">Keine möglichen Duplikate gefunden.</div>'}
     </div></div></div>`;
   $('.modal', m).addEventListener('click', e => { if (e.target.classList.contains('modal')) close(); });
@@ -981,6 +986,31 @@ function openDups() {
   $$('[data-keep]', m).forEach(b => b.onclick = () => {
     const gi = +b.dataset.keep, ign = loadIgnored();
     ign.add(groups[gi].map(x => x.id).sort().join(',')); saveIgnored(ign); done(gi);
+  });
+  $$('[data-view]', m).forEach(b => b.onclick = async () => {
+    const id = b.dataset.view, box = $(`[data-pv="${id}"]`, m);
+    if (box.innerHTML) { box.innerHTML = ''; b.textContent = 'Beleg ansehen'; return; }
+    box.innerHTML = '<div class="skel" style="height:120px;border-radius:10px;margin-left:54px"></div>';
+    try {
+      const r = await api.getFileData(id);
+      if (r && r.b64) {
+        box.innerHTML = `<div class="preview" style="margin:6px 0 0 54px;text-align:left"><img src="data:${r.mime};base64,${r.b64}" alt="Beleg"></div>`;
+        $('img', box).onclick = e => e.target.classList.toggle('zoom');
+      } else if (r) {
+        box.innerHTML = `<a class="btn" style="margin:6px 0 0 54px" href="${esc(r.url)}" target="_blank">${ICON.file} PDF öffnen</a>`;
+      } else box.innerHTML = '<small class="muted" style="margin-left:54px">Datei nicht gefunden</small>';
+      b.textContent = 'Ausblenden';
+    } catch (e) { box.innerHTML = `<small class="muted" style="margin-left:54px">${esc(errMsg(e))}</small>`; }
+  });
+  $$('[data-delall]', m).forEach(b => b.onclick = async () => {
+    const gi = +b.dataset.delall, del = groups[gi].map(x => x.id);
+    if (!confirm(`Alle ${del.length} Belege dieser Gruppe löschen? Die Dateien wandern in den Drive-Papierkorb.`)) return;
+    busy('Wird gelöscht …');
+    try {
+      await api.deleteReceipts(del);
+      S.belege = S.belege.filter(x => !del.includes(x.id));
+      busy(false); toast(`${del.length} Belege gelöscht`); done(gi);
+    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
   });
   $$('[data-merge]', m).forEach(b => b.onclick = async () => {
     const gi = +b.dataset.merge, keep = $(`input[name="g${gi}"]:checked`, m).value;

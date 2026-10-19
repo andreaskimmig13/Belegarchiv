@@ -7,7 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -176,6 +176,7 @@ function prompt_() {
     '  "dokumentart": genau eines von "rechnung" | "quittung" (Kassenbon, Barquittung) | "zahlungsbestaetigung" (z. B. PayPal, Kartenzahlung) | "bestellbestaetigung" | "versandbestaetigung" | "angebot" (auch Kostenvoranschlag, Preisanfrage) | "mahnung" | "gutschrift" | "werbung" | "sonstiges",',
     '  "ist_beleg": true nur, wenn ein Kauf tatsächlich getätigt wurde und ein Betrag genannt ist (rechnung, quittung, zahlungsbestaetigung, bestellbestaetigung); false bei Angeboten, Kostenvoranschlägen, Versandmitteilungen, Mahnungen, Werbung,',
     '  "bestellnummer": Bestell-, Auftrags- oder Rechnungsnummer als Text, falls vorhanden, sonst null,',
+    '  Hinweise zur dokumentart: Wörter wie „Angebot“, „Kostenvoranschlag“, „unverbindlich“, „gültig bis“, „Preisauskunft“ oder fehlende Rechnungsnummer bei einem Handwerker sprechen für "angebot". Eine Rechnung hat in der Regel eine Rechnungsnummer und ein Rechnungsdatum. Im Zweifel nicht "rechnung" wählen.',
     '  "datum": "YYYY-MM-DD" (Kauf- bzw. Rechnungsdatum),',
     '  "haendler": kurzer, gebräuchlicher Name des Geschäfts, bei dem gekauft wurde (z. B. "dm", "Bauhaus", "Aral") – nicht der Zahlungsdienst (PayPal, Klarna) und nicht die Person, die die Mail weitergeleitet hat,',
     '  "betrag": Gesamtbetrag brutto als Zahl mit Punkt als Dezimaltrenner,',
@@ -387,8 +388,12 @@ function importGmail_() {
           const atts = msg.getAttachments({ includeInlineImages: false })
             .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000)
             .slice(0, 3);
+          const weitergeleitet = /^\s*(wg|fw|fwd)\s*:/i.test(msg.getSubject()) ||
+            /(weitergeleitete nachricht|forwarded message|ursprüngliche nachricht|original message)/i.test(msg.getPlainBody().slice(0, 4000));
           const kontext = 'E-Mail von ' + msg.getFrom() + ', Betreff: ' + msg.getSubject() +
-            ', empfangen am ' + Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd') + '.';
+            ', empfangen am ' + Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd') + '.' +
+            (weitergeleitet ? ' ACHTUNG: Diese Mail wurde weitergeleitet. Nur als Beleg werten, wenn eindeutig eine Rechnung oder Quittung über einen getätigten Kauf enthalten ist – nicht bei Angeboten, Anfragen oder Diskussionen über Preise.' : '');
+          const ok = d => d.ist_beleg && d.betrag != null && (!weitergeleitet || d.dokumentart === 'rechnung' || d.dokumentart === 'quittung');
 
           if (atts.length) {
             for (const a of atts) {
@@ -398,13 +403,13 @@ function importGmail_() {
                 ? { type: 'document', source: { type: 'base64', media_type: mime, data: b64 } }
                 : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
               const d = extract_([block, { type: 'text', text: kontext + '\n\n' + prompt_() }]);
-              if (d.ist_beleg && d.betrag != null) st[saveFromMail_(d, b64, mime, msg, personen, rows)]++;
+              if (ok(d)) st[saveFromMail_(d, b64, mime, msg, personen, rows)]++;
               else st.uebersprungen++;
             }
           } else {
             const text = kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000);
             const d = extract_([{ type: 'text', text: text }, { type: 'text', text: prompt_() }]);
-            if (d.ist_beleg && d.betrag != null) {
+            if (ok(d)) {
               const html = '<html><head><meta charset="utf-8"></head><body>' +
                 '<p style="font:12px sans-serif;color:#555">' + escHtml_(kontext) + '</p>' + msg.getBody() + '</body></html>';
               const pdf = Utilities.newBlob(html, 'text/html', 'mail.html').getAs('application/pdf');
