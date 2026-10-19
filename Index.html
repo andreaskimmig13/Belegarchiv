@@ -221,7 +221,7 @@ const ICON = {
 const S = {
   belege: [], personen: [], kategorien: [], hatKey: false, model: '', ordnerUrl: '', tabelleUrl: '', appVersion: '',
   tab: 'erfassen', capture: null,
-  filter: { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: false, steuer: false },
+  filter: { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: false, steuer: false, erst: false },
   dash: { jahr: new Date().getFullYear(), person: '', monat: null, hidden: loadHidden() }
 };
 
@@ -245,6 +245,7 @@ function parseNum(s) {
 function numDe(n) { return n == null || n === '' ? '' : (typeof n === 'number' ? n.toFixed(2) : String(n)).replace('.', ','); }
 function katColor(k) { const i = S.kategorien.indexOf(k); return PALETTE[(i < 0 ? S.kategorien.length : i) % PALETTE.length]; }
 function istAlle(pers) { return S.personen.length > 1 && S.personen.every(p => pers.includes(p)); }
+function netto(b) { return b.retoure === 'komplett' ? 0 : Math.max(0, Math.round(((b.betrag || 0) - (b.erstattet || 0)) * 100) / 100); }
 function personText(v) { const p = personList(v); return istAlle(p) ? 'Alle' : p.join(', '); }
 function errMsg(e) { return (e && (e.message || e.toString())) || 'Unbekannter Fehler'; }
 
@@ -306,6 +307,19 @@ function formHtml(d, mode) {
     <label class="fld"><span>Rückgabe bis</span><input type="date" name="rueckgabe_bis" value="${esc(d.rueckgabe_bis)}"></label>
   </div>
   <div class="quick"><button type="button" class="link" data-g2>Garantie: 2 Jahre</button><button type="button" class="link" data-g0>Keine Garantie</button></div>
+  <label class="fld"><span>Retoure</span><select name="retoure">
+    <option value="" ${!d.retoure ? 'selected' : ''}>Keine</option>
+    <option value="teilweise" ${d.retoure === 'teilweise' ? 'selected' : ''}>Teilweise zurückgegeben</option>
+    <option value="komplett" ${d.retoure === 'komplett' ? 'selected' : ''}>Komplett zurückgegeben</option></select></label>
+  <div class="retbox" ${d.retoure ? '' : 'hidden'}>
+    <div class="grid2">
+      <label class="fld"><span>Erstatteter Betrag (€)</span><input name="erstattet" inputmode="decimal" value="${esc(numDe(d.erstattet))}" placeholder="0,00"></label>
+      <label class="fld"><span>Zurückgegeben am</span><input type="date" name="retoure_am" value="${esc(d.retoure_am || todayIso())}"></label>
+    </div>
+    <label class="fld"><span>Erstattung</span><select name="erstattung_status">
+      <option value="offen" ${d.erstattung_status !== 'erhalten' ? 'selected' : ''}>Noch offen – Erinnerung nach 14 Tagen</option>
+      <option value="erhalten" ${d.erstattung_status === 'erhalten' ? 'selected' : ''}>Geld ist zurück</option></select></label>
+  </div>
   <label class="fld"><span>Steuerlich relevant</span><select name="steuer">${STEUER.map(([v, l]) => `<option value="${v}" ${v === (d.steuer || '') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   <label class="fld lohnfld" ${d.steuer === 'Handwerker/haushaltsnah' ? '' : 'hidden'}><span>Lohn-/Arbeitskostenanteil (€)</span><input name="lohnanteil" inputmode="decimal" value="${esc(numDe(d.lohnanteil))}" placeholder="laut Rechnung"></label>
   <p class="hint kb-hint" ${d.steuer === 'Kinderbetreuung' ? '' : 'hidden'}>Unter „Für wen“ das betreute Kind auswählen. Essensgeld ist nicht absetzbar – falls auf der Rechnung, bitte in der Notiz vermerken.</p>
@@ -343,6 +357,15 @@ function wireForm(root, excludeId) {
   });
   f('bezahlt').addEventListener('change', () => { $('.faellig', root).hidden = f('bezahlt').checked; });
   f('zahlungsart').addEventListener('change', barHint);
+  const retSync = () => {
+    const v = f('retoure').value;
+    $('.retbox', root).hidden = !v;
+    if (v === 'komplett') { f('erstattet').value = numDe(parseNum(f('betrag').value)); f('erstattet').readOnly = true; }
+    else f('erstattet').readOnly = false;
+  };
+  f('retoure').addEventListener('change', retSync);
+  f('betrag').addEventListener('input', () => { if (f('retoure').value === 'komplett') retSync(); });
+  retSync();
   barHint();
   let t;
   const dupCheck = () => {
@@ -376,6 +399,10 @@ function readForm(root) {
     steuer: steuer,
     lohnanteil: steuer === 'Handwerker/haushaltsnah' ? parseNum(f('lohnanteil').value) : null,
     bezahlt: f('bezahlt').checked,
+    retoure: f('retoure').value,
+    erstattet: f('retoure').value ? parseNum(f('erstattet').value) : null,
+    retoure_am: f('retoure').value ? f('retoure_am').value : '',
+    erstattung_status: f('retoure').value ? f('erstattung_status').value : '',
     faellig_am: f('bezahlt').checked ? '' : f('faellig_am').value,
     original_aufheben: f('original_aufheben').checked,
     inventar: f('inventar').checked,
@@ -389,6 +416,8 @@ function validate(o) {
   if (o.betrag == null) return 'Bitte einen Betrag angeben.';
   if (!o.haendler) return 'Bitte den Händler angeben.';
   if (!o.personen.length) return 'Bitte auswählen, für wen der Kauf war.';
+  if (o.retoure === 'teilweise' && (o.erstattet == null || o.erstattet <= 0)) return 'Bitte den erstatteten Betrag angeben.';
+  if (o.retoure && o.erstattet > o.betrag + 0.005) return 'Die Erstattung ist höher als der Rechnungsbetrag.';
   return '';
 }
 
@@ -415,8 +444,8 @@ function renderErfassen() {
   ${recent.length ? `<p class="section-title">Zuletzt erfasst</p><div class="list" style="margin-top:8px">${recent.map(cardHtml).join('')}</div>` : ''}`;
   $$('[data-in]').forEach(i => i.addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; if (files.length) handleFiles(files); }));
   $('[data-manual]').onclick = () => { S.capture = { pages: [], run: 0, manual: true }; showCapture(); fillCapture({ personen: S.personen.slice(0, 1) }); };
-  const of = $('[data-offen]'); if (of) of.onclick = () => { Object.assign(S.filter, { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: true, steuer: false }); go('archiv'); };
-  const pr = $('[data-pruefen]'); if (pr) pr.onclick = () => { Object.assign(S.filter, { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: true, garantie: false, offen: false, steuer: false }); go('archiv'); };
+  const of = $('[data-offen]'); if (of) of.onclick = () => { Object.assign(S.filter, { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: true, steuer: false, erst: false }); go('archiv'); };
+  const pr = $('[data-pruefen]'); if (pr) pr.onclick = () => { Object.assign(S.filter, { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: true, garantie: false, offen: false, steuer: false, erst: false }); go('archiv'); };
   wireList($('#main'));
 }
 
@@ -608,6 +637,7 @@ function filtered() {
     if (f.garantie && !(b.garantie_bis && b.garantie_bis >= heute)) return false;
     if (f.offen && b.bezahlt !== false) return false;
     if (f.steuer && !b.steuer) return false;
+    if (f.erst && !(b.retoure && b.erstattung_status === 'offen')) return false;
     if (terms.length) {
       const hay = [b.haendler, b.produkte, b.notiz, b.kategorie, b.personen, numDe(b.betrag), fmtDate(b.datum)].join(' ').toLowerCase();
       return terms.every(t => hay.includes(t));
@@ -626,6 +656,7 @@ function renderArchiv() {
   const f = S.filter;
   const offen = S.belege.filter(b => b.status === 'zu prüfen').length;
   const unbezahlt = S.belege.filter(b => b.bezahlt === false).length;
+  const erstOffen = S.belege.filter(b => b.retoure && b.erstattung_status === 'offen').length;
   $('#main').innerHTML = `
   <div class="search">${ICON.search}<input type="search" placeholder="Händler, Produkt, Notiz, Betrag …" value="${esc(f.q)}" data-q></div>
   <div class="filters">
@@ -637,6 +668,7 @@ function renderArchiv() {
     <button class="chip ${f.pruefen ? 'on' : ''}" data-c="pruefen">Zu prüfen${offen ? ' (' + offen + ')' : ''}</button>
     <button class="chip ${f.offen ? 'on' : ''}" data-c="offen">Unbezahlt${unbezahlt ? ' (' + unbezahlt + ')' : ''}</button>
     <button class="chip ${f.steuer ? 'on' : ''}" data-c="steuer">Steuerrelevant</button>
+    ${erstOffen ? `<button class="chip ${f.erst ? 'on' : ''}" data-c="erst">Erstattung offen (${erstOffen})</button>` : ''}
     <button class="chip ${f.garantie ? 'on' : ''}" data-c="garantie">Garantie aktiv</button>
   </div>
   <div data-results></div>`;
@@ -647,7 +679,7 @@ function renderArchiv() {
 }
 function renderResults() {
   const list = filtered();
-  const sum = list.reduce((s, b) => s + b.betrag, 0);
+  const sum = list.reduce((s, b) => s + netto(b), 0);
   $('#subtitle').textContent = `${list.length} Beleg${list.length === 1 ? '' : 'e'} · ${EUR.format(sum)}`;
   const box = $('[data-results]');
   if (!list.length) {
@@ -659,7 +691,7 @@ function renderResults() {
     const k = (b.datum || '').slice(0, 7);
     let g = groups[groups.length - 1];
     if (!g || g.k !== k) { g = { k, items: [], sum: 0 }; groups.push(g); }
-    g.items.push(b); g.sum += b.betrag;
+    g.items.push(b); g.sum += netto(b);
   });
   box.innerHTML = groups.map(g => `<div class="month"><span>${g.k ? MONATE_LANG[+g.k.slice(5) - 1] + ' ' + g.k.slice(0, 4) : 'Ohne Datum'}</span><span>${EUR.format(g.sum)}</span></div>
     <div class="list">${g.items.map(cardHtml).join('')}</div>`).join('');
@@ -670,6 +702,7 @@ function cardHtml(b) {
   if (b.status === 'zu prüfen') badges.push('<span class="badge warn">Zu prüfen</span>');
   if (b.garantie_bis && b.garantie_bis >= heute) badges.push(`<span class="badge ok">Garantie bis ${fmtDate(b.garantie_bis)}</span>`);
   if (b.rueckgabe_bis && b.rueckgabe_bis >= heute) badges.push(`<span class="badge warn">Rückgabe bis ${fmtDate(b.rueckgabe_bis)}</span>`);
+  if (b.retoure) badges.push(`<span class="badge ${b.erstattung_status === 'offen' ? 'warn' : ''}">Retoure ${b.retoure}${b.erstattung_status === 'offen' ? ' · Erstattung offen' : ''}</span>`);
   if (b.bezahlt === false) badges.push(`<span class="badge warn">Offen${b.faellig_am ? ' · fällig ' + fmtDate(b.faellig_am) : ''}</span>`);
   if (b.steuer) badges.push(`<span class="badge">${esc(STEUER_KURZ[b.steuer] || 'Steuer')}</span>`);
   if (b.original_aufheben) badges.push('<span class="badge">Original</span>');
@@ -678,7 +711,7 @@ function cardHtml(b) {
   const prod = prodList(b.produkte);
   return `<button class="item" data-id="${esc(b.id)}"><span class="dot" style="background:${katColor(b.kategorie)}"></span>
     <span class="ibody">
-      <span class="irow"><b>${esc(b.haendler || 'Unbekannt')}</b><b class="amt">${EUR.format(b.betrag || 0)}</b></span>
+      <span class="irow"><b>${esc(b.haendler || 'Unbekannt')}</b><b class="amt">${b.retoure ? `<s class="muted" style="font-weight:400;font-size:13px">${EUR.format(b.betrag || 0)}</s> ` : ''}${EUR.format(netto(b))}</b></span>
       <span class="irow sub"><span>${fmtDate(b.datum)} · ${esc(b.kategorie)}</span><span>${esc(personText(b.personen))}</span></span>
       ${prod.length ? `<span class="prod">${esc(prod.join(', '))}</span>` : ''}
       ${badges.length ? `<span class="badges">${badges.join('')}</span>` : ''}
@@ -745,21 +778,23 @@ function renderDashboard() {
   const rowsAll = S.belege.filter(b => (b.datum || '').startsWith(String(D.jahr)) && (!D.person || personList(b.personen).includes(D.person)));
   const rows = rowsAll.filter(b => !D.hidden.has(b.kategorie));
   const allKats = [...S.kategorien, ...new Set(rowsAll.map(b => b.kategorie).filter(k => !S.kategorien.includes(k)))];
-  const katSum = {}; rowsAll.forEach(b => katSum[b.kategorie] = (katSum[b.kategorie] || 0) + b.betrag);
+  const katSum = {}; rowsAll.forEach(b => katSum[b.kategorie] = (katSum[b.kategorie] || 0) + netto(b));
   const nHidden = allKats.filter(k => D.hidden.has(k)).length;
   const byMonth = Array.from({ length: 12 }, () => ({}));
-  rows.forEach(b => { const m = +b.datum.slice(5, 7) - 1; byMonth[m][b.kategorie] = (byMonth[m][b.kategorie] || 0) + b.betrag; });
-  const total = rows.reduce((s, b) => s + b.betrag, 0);
+  rows.forEach(b => { const m = +b.datum.slice(5, 7) - 1; byMonth[m][b.kategorie] = (byMonth[m][b.kategorie] || 0) + netto(b); });
+  const total = rows.reduce((s, b) => s + netto(b), 0);
   const monate = D.jahr === now.getFullYear() ? now.getMonth() + 1 : 12;
   const scope = D.monat == null ? rows : rows.filter(b => +b.datum.slice(5, 7) - 1 === D.monat);
-  const scopeSum = scope.reduce((s, b) => s + b.betrag, 0);
-  const byKat = {}; scope.forEach(b => byKat[b.kategorie] = (byKat[b.kategorie] || 0) + b.betrag);
-  const kats = Object.entries(byKat).sort((a, b) => b[1] - a[1]);
-  const byH = {}; scope.forEach(b => { const k = b.haendler || 'Unbekannt'; byH[k] = (byH[k] || 0) + b.betrag; });
+  const scopeSum = scope.reduce((s, b) => s + netto(b), 0);
+  const byKat = {}; scope.forEach(b => byKat[b.kategorie] = (byKat[b.kategorie] || 0) + netto(b));
+  const kats = Object.entries(byKat).filter(e => e[1] > 0).sort((a, b) => b[1] - a[1]);
+  const byH = {}; scope.forEach(b => { const k = b.haendler || 'Unbekannt'; byH[k] = (byH[k] || 0) + netto(b); });
   const topH = Object.entries(byH).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const heute = todayIso(), bald = addIso(heute, { days: 90 });
   const gar = S.belege.filter(b => b.garantie_bis && b.garantie_bis >= heute && b.garantie_bis <= bald).sort((a, b) => a.garantie_bis.localeCompare(b.garantie_bis)).slice(0, 8);
   const unbez = S.belege.filter(b => b.bezahlt === false).sort((a, b) => (a.faellig_am || '9999').localeCompare(b.faellig_am || '9999'));
+  const erstOffen = S.belege.filter(b => b.retoure && b.erstattung_status === 'offen').sort((a, b) => (a.retoure_am || '').localeCompare(b.retoure_am || ''));
+  const erstSoll = b => b.retoure === 'komplett' ? b.betrag : (b.erstattet || 0);
   const scopeLabel = D.monat == null ? String(D.jahr) : MONATE_LANG[D.monat] + ' ' + D.jahr;
 
   $('#main').innerHTML = `
@@ -790,6 +825,9 @@ function renderDashboard() {
   </section>
   ${topH.length ? `<section class="card"><h3><span>Top-Händler · ${esc(scopeLabel)}</span></h3>
     ${topH.map(([h, v]) => `<div class="mini"><span>${esc(h)}</span><b>${EUR.format(v)}</b></div>`).join('')}</section>` : ''}
+  ${erstOffen.length ? `<section class="card"><h3><span>Erstattungen offen</span><small>${EUR.format(erstOffen.reduce((s, b) => s + erstSoll(b), 0))}</small></h3>
+    ${erstOffen.map(b => { const t = b.retoure_am ? Math.floor((new Date() - new Date(b.retoure_am)) / 864e5) : 0;
+      return `<button class="katrow" data-open="${esc(b.id)}"><span class="irow"><span>${esc(b.haendler)} <small style="color:${t > 14 ? 'var(--danger)' : 'var(--muted)'}">seit ${t} Tag${t === 1 ? '' : 'en'}</small></span><b class="amt">${EUR.format(erstSoll(b))}</b></span></button>`; }).join('')}</section>` : ''}
   ${unbez.length ? `<section class="card"><h3><span>Offene Rechnungen</span><small>${EUR.format(unbez.reduce((s, b) => s + b.betrag, 0))}</small></h3>
     ${unbez.map(b => `<button class="katrow" data-open="${esc(b.id)}"><span class="irow"><span>${esc(b.haendler)}${b.faellig_am ? ` <small style="color:${b.faellig_am < heute ? 'var(--danger)' : 'var(--muted)'}">fällig ${fmtDate(b.faellig_am)}</small>` : ''}</span><b class="amt">${EUR.format(b.betrag)}</b></span></button>`).join('')}</section>` : ''}
   <section class="card"><h3><span>Garantie endet in 90 Tagen</span></h3>
@@ -812,7 +850,7 @@ function renderDashboard() {
   $$('[data-m]').forEach(r => r.addEventListener('click', () => { const m = +r.dataset.m; D.monat = D.monat === m ? null : m; renderDashboard(); }));
   const am = $('[data-allm]'); if (am) am.onclick = () => { D.monat = null; renderDashboard(); };
   $$('[data-kat]').forEach(r => r.onclick = () => {
-    Object.assign(S.filter, { q: '', kat: r.dataset.kat, person: D.person, pruefen: false, garantie: false, offen: false, steuer: false,
+    Object.assign(S.filter, { q: '', kat: r.dataset.kat, person: D.person, pruefen: false, garantie: false, offen: false, steuer: false, erst: false,
       zeitraum: D.monat == null ? String(D.jahr) : `${D.jahr}-${pad(D.monat + 1)}` });
     go('archiv');
   });
@@ -895,6 +933,7 @@ function renderMehr() {
       const teile = [];
       if (r.importiert) teile.push(`${r.importiert} neu`);
       if (r.zusammengefuehrt) teile.push(`${r.zusammengefuehrt} mit vorhandenen zusammengeführt`);
+      if (r.erstattungen) teile.push(`${r.erstattungen} Erstattung${r.erstattungen > 1 ? 'en' : ''} verbucht`);
       if (r.uebersprungen) teile.push(`${r.uebersprungen} übersprungen`);
       toast(teile.length ? teile.join(' · ') : 'Keine neuen Rechnungen gefunden');
     } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }

@@ -7,7 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.5.2';
+const APP_VERSION = '1.6.0';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -23,6 +23,8 @@ const CFG = {
   GMAIL_TAGE: 30,
   GMAIL_MAX_THREADS: 25,
   DUPLIKAT_TAGE: 14,
+  ERSTATTUNG_ERINNERUNG_TAGE: 14,
+  ERSTATTUNG_SUCHE_TAGE: 120,
 };
 
 const COLS = [
@@ -30,13 +32,15 @@ const COLS = [
   'personen', 'produkte', 'zahlungsart', 'steuer', 'lohnanteil',
   'garantie_bis', 'rueckgabe_bis', 'original_aufheben', 'inventar',
   'status', 'quelle', 'datei_id', 'datei_name', 'mime', 'notiz',
-  'kalender_ids', 'gmail_id', 'bezahlt', 'faellig_am', 'bestellnummer', 'dokumentart'
+  'kalender_ids', 'gmail_id', 'bezahlt', 'faellig_am', 'bestellnummer', 'dokumentart',
+  'retoure', 'erstattet', 'erstattung_status', 'retoure_am', 'erstattungen'
 ];
 
 const EDITABLE = [
   'datum', 'haendler', 'betrag', 'waehrung', 'kategorie', 'personen', 'produkte',
   'zahlungsart', 'steuer', 'lohnanteil', 'garantie_bis', 'rueckgabe_bis',
-  'original_aufheben', 'inventar', 'status', 'notiz', 'bezahlt', 'faellig_am', 'bestellnummer', 'dokumentart'
+  'original_aufheben', 'inventar', 'status', 'notiz', 'bezahlt', 'faellig_am', 'bestellnummer', 'dokumentart',
+  'retoure', 'erstattet', 'erstattung_status', 'retoure_am'
 ];
 
 /* Dokumentarten, die als Kaufbeleg übernommen werden – in Rangfolge (Rechnung ist am wertvollsten) */
@@ -173,13 +177,13 @@ function prompt_() {
     'Du liest einen Kaufbeleg aus (Kassenbon, Rechnung oder Bestellbestätigung). Heute ist ' + today_() + '.',
     'Antworte ausschließlich mit einem JSON-Objekt, ohne weiteren Text, mit genau diesen Feldern:',
     '{',
-    '  "dokumentart": genau eines von "rechnung" | "quittung" (Kassenbon, Barquittung) | "zahlungsbestaetigung" (z. B. PayPal, Kartenzahlung) | "bestellbestaetigung" | "versandbestaetigung" | "angebot" (auch Kostenvoranschlag, Preisanfrage) | "mahnung" | "gutschrift" | "werbung" | "sonstiges",',
+    '  "dokumentart": genau eines von "rechnung" | "quittung" (Kassenbon, Barquittung) | "zahlungsbestaetigung" (z. B. PayPal, Kartenzahlung) | "bestellbestaetigung" | "versandbestaetigung" | "angebot" (auch Kostenvoranschlag, Preisanfrage) | "mahnung" | "erstattung" (Gutschrift, Rückerstattung, Rückzahlung, Retoure verbucht – Geld kommt zurück) | "werbung" | "sonstiges",',
     '  "ist_beleg": true nur, wenn ein Kauf tatsächlich getätigt wurde und ein Betrag genannt ist (rechnung, quittung, zahlungsbestaetigung, bestellbestaetigung); false bei Angeboten, Kostenvoranschlägen, Versandmitteilungen, Mahnungen, Werbung,',
     '  "bestellnummer": Bestell-, Auftrags- oder Rechnungsnummer als Text, falls vorhanden, sonst null,',
     '  Hinweise zur dokumentart: Wörter wie „Angebot“, „Kostenvoranschlag“, „unverbindlich“, „gültig bis“, „Preisauskunft“ oder fehlende Rechnungsnummer bei einem Handwerker sprechen für "angebot". Eine Rechnung hat in der Regel eine Rechnungsnummer und ein Rechnungsdatum. Im Zweifel nicht "rechnung" wählen.',
     '  "datum": "YYYY-MM-DD" (Kauf- bzw. Rechnungsdatum),',
     '  "haendler": kurzer, gebräuchlicher Name des Geschäfts, bei dem gekauft wurde (z. B. "dm", "Bauhaus", "Aral") – nicht der Zahlungsdienst (PayPal, Klarna) und nicht die Person, die die Mail weitergeleitet hat,',
-    '  "betrag": Gesamtbetrag brutto als Zahl mit Punkt als Dezimaltrenner,',
+    '  "betrag": Gesamtbetrag brutto als Zahl mit Punkt als Dezimaltrenner – bei dokumentart "erstattung" der erstattete Betrag (positiv),',
     '  "waehrung": z. B. "EUR",',
     '  "kategorie": genau eine aus ' + JSON.stringify(kats) + ',',
     '  "produkte": Liste der Artikel als verständliche Namen – Kürzel vom Bon ausschreiben (z. B. "BOHRM.BOSCH PSB" → "Bosch Schlagbohrmaschine PSB"); bei vielen Positionen höchstens die 8 wichtigsten,',
@@ -271,6 +275,7 @@ function saveReceipt(data) {
       o.datei_name = file.getName();
       o.mime = data.mime;
     }
+    normRetoure_(o);
     o.kalender_ids = createReminders_(o);
     sheet_().appendRow(toRow_(o));
     return o;
@@ -289,6 +294,7 @@ function updateReceipt(id, fields) {
     const old = toObj_(sh.getRange(idx, 1, 1, COLS.length).getValues()[0]);
     const o = Object.assign({}, old, pick_(fields));
     if (o.bezahlt) o.faellig_am = '';
+    normRetoure_(o);
 
     if (o.datei_id && (o.datum !== old.datum || o.haendler !== old.haendler || o.betrag !== old.betrag)) {
       try {
@@ -302,7 +308,8 @@ function updateReceipt(id, fields) {
 
     if (o.garantie_bis !== old.garantie_bis || o.rueckgabe_bis !== old.rueckgabe_bis ||
         o.haendler !== old.haendler || o.produkte !== old.produkte ||
-        o.bezahlt !== old.bezahlt || o.faellig_am !== old.faellig_am) {
+        o.bezahlt !== old.bezahlt || o.faellig_am !== old.faellig_am ||
+        o.retoure !== old.retoure || o.erstattung_status !== old.erstattung_status || o.retoure_am !== old.retoure_am) {
       deleteReminders_(old.kalender_ids);
       o.kalender_ids = createReminders_(o);
     }
@@ -374,9 +381,10 @@ function importGmail_() {
     const ich = Session.getEffectiveUser().getEmail().toLowerCase();
     const q = 'newer_than:' + CFG.GMAIL_TAGE + 'd -label:' + CFG.GMAIL_LABEL_SEARCH +
       ' -category:promotions -category:social -from:me' +
-      ' {rechnung invoice quittung kaufbeleg receipt "ihre bestellung" bestellbestätigung zahlungsbestätigung "your order"}';
+      ' {rechnung invoice quittung kaufbeleg receipt "ihre bestellung" bestellbestätigung zahlungsbestätigung "your order"' +
+    ' erstattung rückerstattung rückzahlung gutschrift refund "retoure"}';
     const threads = GmailApp.search(q, 0, CFG.GMAIL_MAX_THREADS);
-    const st = { importiert: 0, zusammengefuehrt: 0, uebersprungen: 0, geprueft: 0 };
+    const st = { importiert: 0, zusammengefuehrt: 0, uebersprungen: 0, erstattungen: 0, geprueft: 0 };
 
     for (const thread of threads) {
       if (Date.now() - start > 4.5 * 60 * 1000) break;
@@ -403,13 +411,15 @@ function importGmail_() {
                 ? { type: 'document', source: { type: 'base64', media_type: mime, data: b64 } }
                 : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
               const d = extract_([block, { type: 'text', text: kontext + '\n\n' + prompt_() }]);
+              if (d.dokumentart === 'erstattung') { st[verbucheErstattung_(d, msg, rows)]++; continue; }
               if (ok(d)) st[saveFromMail_(d, b64, mime, msg, personen, rows)]++;
               else st.uebersprungen++;
             }
           } else {
             const text = kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000);
             const d = extract_([{ type: 'text', text: text }, { type: 'text', text: prompt_() }]);
-            if (ok(d)) {
+            if (d.dokumentart === 'erstattung') st[verbucheErstattung_(d, msg, rows)]++;
+            else if (ok(d)) {
               const html = '<html><head><meta charset="utf-8"></head><body>' +
                 '<p style="font:12px sans-serif;color:#555">' + escHtml_(kontext) + '</p>' + msg.getBody() + '</body></html>';
               const pdf = Utilities.newBlob(html, 'text/html', 'mail.html').getAs('application/pdf');
@@ -445,6 +455,56 @@ function findeGleichenKauf_(d, datum, rows) {
     return Math.abs(r.betrag - d.betrag) < 0.01 && r.datum && tageAbstand_(r.datum, datum) <= CFG.DUPLIKAT_TAGE &&
       aehnlicherHaendler_(r.haendler, d.haendler);
   });
+}
+
+/* Erstattungs-Mail dem ursprünglichen Kauf zuordnen – nie als eigener Beleg */
+function erstListe_(r) {
+  return String(r.erstattungen || '').split(';').filter(String)
+    .map(x => { const t = x.split(':'); return { d: t[0], b: Number(t[1]) }; });
+}
+
+function verbucheErstattung_(d, msg, rows) {
+  if (d.betrag == null || d.betrag <= 0) return 'uebersprungen';
+  const datum = d.datum || Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd');
+  const nr = normNr_(d.bestellnummer);
+  const kandidaten = rows
+    .filter(r => !(r.retoure === 'komplett' && r.erstattung_status === 'erhalten') && r.datum && r.datum <= datum &&
+      tageAbstand_(r.datum, datum) <= CFG.ERSTATTUNG_SUCHE_TAGE &&
+      r.betrag - erstListe_(r).reduce((s, x) => s + x.b, 0) >= d.betrag - 0.01)
+    .map(r => {
+      let p = 0;
+      if (nr && nr.length >= 4 && normNr_(r.bestellnummer) === nr) p += 10;
+      if (aehnlicherHaendler_(r.haendler, d.haendler)) p += 4;
+      if (Math.abs(r.betrag - d.betrag) < 0.01) p += 2;
+      if (r.retoure) p += 1;
+      return { r: r, p: p };
+    })
+    .filter(x => x.p >= 4)
+    .sort((a, b) => b.p - a.p || b.r.datum.localeCompare(a.r.datum));
+  if (!kandidaten.length) return 'uebersprungen';
+  const r = kandidaten[0].r;
+
+  // Dieselbe Erstattung nicht doppelt zählen (z. B. Mail vom Händler und von PayPal)
+  const liste = erstListe_(r);
+  if (liste.some(x => Math.abs(x.b - d.betrag) < 0.01 && tageAbstand_(x.d, datum) <= 10)) return 'uebersprungen';
+  liste.push({ d: datum, b: d.betrag });
+  const eingegangen = Math.round(liste.reduce((s, x) => s + x.b, 0) * 100) / 100;
+
+  // Erwartete Erstattung (falls Retoure vorher von Hand eingetragen) vs. tatsächlich eingegangen
+  const erwartet = r.retoure ? (r.retoure === 'komplett' ? r.betrag : (r.erstattet || 0)) : 0;
+  const erstattet = Math.min(r.betrag, Math.max(eingegangen, erwartet));
+  const felder = {
+    retoure: erstattet >= r.betrag - 0.005 ? 'komplett' : 'teilweise',
+    erstattet: erstattet,
+    erstattung_status: eingegangen >= erstattet - 0.01 ? 'erhalten' : 'offen',
+    retoure_am: r.retoure_am || datum,
+    notiz: (r.notiz ? r.notiz + ' · ' : '') + 'Erstattung ' + de_(d.betrag) + ' € am ' + fmtDE_(datum) + ' (Gmail)'
+  };
+  const erst = liste.map(x => x.d + ':' + x.b).join(';');
+  const u = updateReceipt(r.id, felder);
+  setzeFelder_(r.id, { erstattungen: erst });
+  Object.assign(r, u, { erstattungen: erst });
+  return 'erstattungen';
 }
 
 function rang_(art) { const i = BELEG_ARTEN.indexOf(art); return i < 0 ? 99 : i; }
@@ -543,7 +603,7 @@ function ensureHeader_() {
 function exportSteuer(jahr) {
   jahr = String(jahr);
   const all = getAllRows_()
-    .filter(r => r.steuer && r.datum.indexOf(jahr) === 0)
+    .filter(r => r.steuer && r.datum.indexOf(jahr) === 0 && r.retoure !== 'komplett')
     .sort((a, b) => a.datum.localeCompare(b.datum));
   const hw = all.filter(r => r.steuer === 'Handwerker/haushaltsnah');
   const kb = all.filter(r => r.steuer === 'Kinderbetreuung');
@@ -559,17 +619,17 @@ function exportSteuer(jahr) {
 
   const csv = toCsv_(
     ['Art', 'Datum', 'Händler', 'Leistung', 'Für wen', 'Rechnungsbetrag', 'Lohn-/Arbeitskosten', 'Zahlungsart', 'Bezahlt', 'Beleg'],
-    all.map(r => [r.steuer, fmtDE_(r.datum), r.haendler, r.produkte, r.personen, de_(r.betrag),
+    all.map(r => [r.steuer, fmtDE_(r.datum), r.haendler, r.produkte, r.personen, de_(netto_(r)),
       r.lohnanteil == null ? '' : de_(r.lohnanteil), r.zahlungsart, r.bezahlt ? 'ja' : 'nein', link(r)])
   );
 
   let body = '';
   if (hw.length) {
-    const sB = hw.reduce((s, r) => s + r.betrag, 0), sL = hw.reduce((s, r) => s + (r.lohnanteil || 0), 0);
+    const sB = hw.reduce((s, r) => s + netto_(r), 0), sL = hw.reduce((s, r) => s + (r.lohnanteil || 0), 0);
     body += '<h2>Handwerkerleistungen & haushaltsnahe Dienstleistungen (§35a EStG)</h2>' +
       '<table><tr><th>Datum</th><th>Händler</th><th>Leistung</th><th class="r">Betrag</th><th class="r">Lohnanteil</th><th>Zahlung</th></tr>' +
       hw.map(r => '<tr><td>' + fmtDE_(r.datum) + '</td><td>' + escHtml_(r.haendler) + '</td><td>' + escHtml_(r.produkte) +
-        '</td><td class="r">' + de_(r.betrag) + ' €</td><td class="r">' + (r.lohnanteil == null ? '–' : de_(r.lohnanteil) + ' €') +
+        '</td><td class="r">' + de_(netto_(r)) + ' €</td><td class="r">' + (r.lohnanteil == null ? '–' : de_(r.lohnanteil) + ' €') +
         '</td><td>' + escHtml_(r.zahlungsart) + (r.bezahlt ? '' : ' (offen)') + '</td></tr>').join('') +
       '<tr class="sum"><td colspan="3">Summe (' + hw.length + ' Belege)</td><td class="r">' + de_(sB) + ' €</td><td class="r">' + de_(sL) + ' €</td><td></td></tr></table>' +
       warnBar(hw) + warnOffen(hw) +
@@ -584,10 +644,10 @@ function exportSteuer(jahr) {
     });
     body += '<h2>Kinderbetreuungskosten (§10 Abs. 1 Nr. 5 EStG)</h2>';
     Object.keys(byKind).sort().forEach(k => {
-      const rows = byKind[k], sum = rows.reduce((s, r) => s + r.betrag, 0);
+      const rows = byKind[k], sum = rows.reduce((s, r) => s + netto_(r), 0);
       body += '<h3>' + escHtml_(k) + '</h3><table><tr><th>Datum</th><th>Einrichtung / Person</th><th>Leistung</th><th class="r">Betrag</th><th>Zahlung</th></tr>' +
         rows.map(r => '<tr><td>' + fmtDE_(r.datum) + '</td><td>' + escHtml_(r.haendler) + '</td><td>' + escHtml_(r.produkte) +
-          '</td><td class="r">' + de_(r.betrag) + ' €</td><td>' + escHtml_(r.zahlungsart) + (r.bezahlt ? '' : ' (offen)') + '</td></tr>').join('') +
+          '</td><td class="r">' + de_(netto_(r)) + ' €</td><td>' + escHtml_(r.zahlungsart) + (r.bezahlt ? '' : ' (offen)') + '</td></tr>').join('') +
         '<tr class="sum"><td colspan="3">Summe ' + escHtml_(k) + '</td><td class="r">' + de_(sum) + ' €</td><td></td></tr></table>';
     });
     body += warnBar(kb) + warnOffen(kb) +
@@ -604,15 +664,15 @@ function exportJahr(jahr) {
   jahr = String(jahr);
   const rows = getAllRows_().filter(r => r.datum.indexOf(jahr) === 0).sort((a, b) => a.datum.localeCompare(b.datum));
   const csv = toCsv_(
-    ['Datum', 'Händler', 'Betrag', 'Kategorie', 'Für wen', 'Produkte', 'Zahlungsart', 'Bezahlt', 'Fällig am', 'Steuer', 'Lohnanteil', 'Garantie bis', 'Notiz', 'Quelle'],
-    rows.map(r => [fmtDE_(r.datum), r.haendler, de_(r.betrag), r.kategorie, r.personen, r.produkte, r.zahlungsart,
+    ['Datum', 'Händler', 'Betrag', 'Retoure', 'Erstattet', 'Netto', 'Kategorie', 'Für wen', 'Produkte', 'Zahlungsart', 'Bezahlt', 'Fällig am', 'Steuer', 'Lohnanteil', 'Garantie bis', 'Notiz', 'Quelle'],
+    rows.map(r => [fmtDE_(r.datum), r.haendler, de_(r.betrag), r.retoure, r.erstattet == null ? '' : de_(r.erstattet), de_(netto_(r)), r.kategorie, r.personen, r.produkte, r.zahlungsart,
       r.bezahlt ? 'ja' : 'nein', fmtDE_(r.faellig_am), r.steuer, r.lohnanteil == null ? '' : de_(r.lohnanteil), fmtDE_(r.garantie_bis), r.notiz, r.quelle])
   );
   return writeExports_('Alle_Belege_' + jahr, csv, null, rows.length);
 }
 
 function exportInventar() {
-  const rows = getAllRows_().filter(r => r.inventar).sort((a, b) => a.datum.localeCompare(b.datum));
+  const rows = getAllRows_().filter(r => r.inventar && r.retoure !== 'komplett').sort((a, b) => a.datum.localeCompare(b.datum));
   const sum = rows.reduce((s, r) => s + r.betrag, 0);
   const html = pdfHtml_('Hausrat-Inventarliste',
     '<p class="hint">Stand: ' + fmtDE_(today_()) + '</p>' +
@@ -667,6 +727,25 @@ function saveSettings(s) {
 
 /* ───────────────────────── Kalender ───────────────────────── */
 
+function netto_(r) {
+  if (r.retoure === 'komplett') return 0;
+  return Math.max(0, Math.round((r.betrag - (r.erstattet || 0)) * 100) / 100);
+}
+
+function normRetoure_(o) {
+  if (o.retoure !== 'teilweise' && o.retoure !== 'komplett') {
+    o.retoure = ''; o.erstattet = null; o.erstattung_status = ''; o.retoure_am = '';
+    return;
+  }
+  if (!o.retoure_am) o.retoure_am = today_();
+  if (o.erstattung_status !== 'erhalten') o.erstattung_status = 'offen';
+  if (o.retoure === 'teilweise' && o.erstattet != null && o.erstattet >= o.betrag - 0.005) o.retoure = 'komplett';
+  if (o.retoure === 'komplett') {
+    o.erstattet = o.betrag;
+    o.garantie_bis = ''; o.rueckgabe_bis = ''; o.inventar = false;
+  }
+}
+
 function createReminders_(o) {
   const ids = [];
   try {
@@ -674,6 +753,14 @@ function createReminders_(o) {
     const heute = parseDate_(today_());
     const was = (o.produkte ? String(o.produkte).split(';')[0].trim() : '') || o.haendler || 'Beleg';
     const info = 'Händler: ' + o.haendler + '\nKaufdatum: ' + fmtDE_(o.datum) + '\nBetrag: ' + de_(o.betrag) + ' €';
+    if (o.retoure && o.erstattung_status === 'offen') {
+      let d = addDays_(parseDate_(o.retoure_am || today_()), CFG.ERSTATTUNG_ERINNERUNG_TAGE);
+      if (d < heute) d = heute;
+      const soll = o.retoure === 'komplett' ? o.betrag : (o.erstattet || 0);
+      ids.push(cal.createAllDayEvent('Erstattung prüfen: ' + (o.haendler || was) + (soll ? ' (' + de_(soll) + ' €)' : ''), d,
+        { description: 'Retoure ' + o.retoure + ' am ' + fmtDE_(o.retoure_am) + ' – ist das Geld schon zurück?\n' + info }).getId());
+    }
+    if (o.retoure === 'komplett') return ids.join(',');
     if (o.garantie_bis) {
       const d = addDays_(parseDate_(o.garantie_bis), -CFG.GARANTIE_VORLAUF_TAGE);
       if (d >= heute) ids.push(cal.createAllDayEvent('Garantie endet bald: ' + was, d,
@@ -758,6 +845,7 @@ function toObj_(r) {
   o.original_aufheben = o.original_aufheben === 'ja';
   o.inventar = o.inventar === 'ja';
   o.bezahlt = o.bezahlt !== 'nein';
+  o.erstattet = o.erstattet === '' ? null : num_(o.erstattet);
   return o;
 }
 
@@ -779,7 +867,7 @@ function pick_(data) {
     if (k === 'personen' && Array.isArray(v)) v = v.join(', ');
     if (k === 'produkte' && Array.isArray(v)) v = v.join('; ');
     if (k === 'betrag') v = num_(v);
-    if (k === 'lohnanteil') v = (v === '' || v == null) ? null : num_(v);
+    if (k === 'lohnanteil' || k === 'erstattet') v = (v === '' || v == null) ? null : num_(v);
     if (k === 'original_aufheben' || k === 'inventar' || k === 'bezahlt') v = !!v;
     if (typeof v === 'string') v = v.trim();
     o[k] = v;
