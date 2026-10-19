@@ -7,7 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.5.0';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -22,6 +22,7 @@ const CFG = {
   FAELLIG_VORLAUF_TAGE: 2,
   GMAIL_TAGE: 30,
   GMAIL_MAX_THREADS: 25,
+  DUPLIKAT_TAGE: 14,
 };
 
 const COLS = [
@@ -29,14 +30,17 @@ const COLS = [
   'personen', 'produkte', 'zahlungsart', 'steuer', 'lohnanteil',
   'garantie_bis', 'rueckgabe_bis', 'original_aufheben', 'inventar',
   'status', 'quelle', 'datei_id', 'datei_name', 'mime', 'notiz',
-  'kalender_ids', 'gmail_id', 'bezahlt', 'faellig_am'
+  'kalender_ids', 'gmail_id', 'bezahlt', 'faellig_am', 'bestellnummer', 'dokumentart'
 ];
 
 const EDITABLE = [
   'datum', 'haendler', 'betrag', 'waehrung', 'kategorie', 'personen', 'produkte',
   'zahlungsart', 'steuer', 'lohnanteil', 'garantie_bis', 'rueckgabe_bis',
-  'original_aufheben', 'inventar', 'status', 'notiz', 'bezahlt', 'faellig_am'
+  'original_aufheben', 'inventar', 'status', 'notiz', 'bezahlt', 'faellig_am', 'bestellnummer', 'dokumentart'
 ];
+
+/* Dokumentarten, die als Kaufbeleg übernommen werden – in Rangfolge (Rechnung ist am wertvollsten) */
+const BELEG_ARTEN = ['rechnung', 'quittung', 'zahlungsbestaetigung', 'bestellbestaetigung'];
 
 const STEUER_ARTEN = ['Handwerker/haushaltsnah', 'Kinderbetreuung'];
 
@@ -128,6 +132,7 @@ function doGet() {
 
 function getInit() {
   ensureSetup_();
+  ensureHeader_();
   const p = props_();
   return {
     personen: JSON.parse(p.getProperty('PERSONEN') || '[]'),
@@ -168,9 +173,11 @@ function prompt_() {
     'Du liest einen Kaufbeleg aus (Kassenbon, Rechnung oder Bestellbestätigung). Heute ist ' + today_() + '.',
     'Antworte ausschließlich mit einem JSON-Objekt, ohne weiteren Text, mit genau diesen Feldern:',
     '{',
-    '  "ist_beleg": true oder false – ist das ein Kaufbeleg/eine Rechnung mit Betrag?,',
+    '  "dokumentart": genau eines von "rechnung" | "quittung" (Kassenbon, Barquittung) | "zahlungsbestaetigung" (z. B. PayPal, Kartenzahlung) | "bestellbestaetigung" | "versandbestaetigung" | "angebot" (auch Kostenvoranschlag, Preisanfrage) | "mahnung" | "gutschrift" | "werbung" | "sonstiges",',
+    '  "ist_beleg": true nur, wenn ein Kauf tatsächlich getätigt wurde und ein Betrag genannt ist (rechnung, quittung, zahlungsbestaetigung, bestellbestaetigung); false bei Angeboten, Kostenvoranschlägen, Versandmitteilungen, Mahnungen, Werbung,',
+    '  "bestellnummer": Bestell-, Auftrags- oder Rechnungsnummer als Text, falls vorhanden, sonst null,',
     '  "datum": "YYYY-MM-DD" (Kauf- bzw. Rechnungsdatum),',
-    '  "haendler": kurzer, gebräuchlicher Name des Geschäfts (z. B. "dm", "Bauhaus", "Aral"),',
+    '  "haendler": kurzer, gebräuchlicher Name des Geschäfts, bei dem gekauft wurde (z. B. "dm", "Bauhaus", "Aral") – nicht der Zahlungsdienst (PayPal, Klarna) und nicht die Person, die die Mail weitergeleitet hat,',
     '  "betrag": Gesamtbetrag brutto als Zahl mit Punkt als Dezimaltrenner,',
     '  "waehrung": z. B. "EUR",',
     '  "kategorie": genau eine aus ' + JSON.stringify(kats) + ',',
@@ -200,6 +207,9 @@ function extract_(content) {
   if (!Array.isArray(d.produkte)) d.produkte = d.produkte ? [String(d.produkte)] : [];
   if (d.datum && !/^\d{4}-\d{2}-\d{2}$/.test(d.datum)) d.datum = null;
   if (d.faellig_am && !/^\d{4}-\d{2}-\d{2}$/.test(d.faellig_am)) d.faellig_am = null;
+  d.dokumentart = String(d.dokumentart || '').toLowerCase().replace(/ä/g, 'ae');
+  if (d.ist_beleg && d.dokumentart && BELEG_ARTEN.indexOf(d.dokumentart) < 0) d.ist_beleg = false;
+  d.bestellnummer = d.bestellnummer ? String(d.bestellnummer).trim() : '';
   if (!STEUER_ARTEN.includes(d.steuer_art)) d.steuer_art = d.handwerker ? STEUER_ARTEN[0] : null;
   if (d.steuer_art !== STEUER_ARTEN[0]) d.lohnanteil = null;
   d.bezahlt = d.bezahlt !== false;
@@ -346,65 +356,111 @@ function runGmailImport() { return importGmail_(); }
 
 function importGmail_() {
   ensureSetup_();
+  ensureHeader_();
   if (!props_().getProperty('ANTHROPIC_API_KEY')) return { importiert: 0, geprueft: 0, hinweis: 'Kein API-Schlüssel' };
-  const start = Date.now();
-  const label = GmailApp.getUserLabelByName(CFG.GMAIL_LABEL) || GmailApp.createLabel(CFG.GMAIL_LABEL);
-  const rows = getAllRows_();
-  const known = new Set(rows.map(r => r.gmail_id).filter(String));
-  const personen = JSON.parse(props_().getProperty('PERSONEN') || '[]');
-  const q = 'newer_than:' + CFG.GMAIL_TAGE + 'd -label:' + CFG.GMAIL_LABEL_SEARCH +
-    ' {rechnung invoice quittung kaufbeleg receipt "ihre bestellung" bestellbestätigung zahlungsbestätigung "your order"}';
-  const threads = GmailApp.search(q, 0, CFG.GMAIL_MAX_THREADS);
-  let importiert = 0, geprueft = 0;
 
-  for (const thread of threads) {
-    if (Date.now() - start > 4.5 * 60 * 1000) break;
-    for (const msg of thread.getMessages()) {
-      if (known.has(msg.getId())) continue;
-      geprueft++;
-      try {
-        const atts = msg.getAttachments({ includeInlineImages: false })
-          .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000)
-          .slice(0, 3);
-        const kontext = 'E-Mail von ' + msg.getFrom() + ', Betreff: ' + msg.getSubject() +
-          ', empfangen am ' + Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd') + '.';
+  // Nie zwei Läufe gleichzeitig (Morgenlauf + „Jetzt suchen“)
+  const cache = CacheService.getScriptCache();
+  if (cache.get('gmailImportLaeuft')) return { importiert: 0, geprueft: 0, hinweis: 'Es läuft bereits eine Suche – bitte in ein paar Minuten erneut versuchen.' };
+  cache.put('gmailImportLaeuft', '1', 360);
 
-        if (atts.length) {
-          for (const a of atts) {
-            const mime = a.getContentType();
-            const b64 = Utilities.base64Encode(a.getBytes());
-            const block = mime === 'application/pdf'
-              ? { type: 'document', source: { type: 'base64', media_type: mime, data: b64 } }
-              : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
-            const d = extract_([block, { type: 'text', text: kontext + '\n\n' + prompt_() }]);
-            if (d.ist_beleg && d.betrag != null) {
-              saveFromMail_(d, b64, mime, msg, personen, rows);
-              importiert++;
+  try {
+    const start = Date.now();
+    const label = GmailApp.getUserLabelByName(CFG.GMAIL_LABEL) || GmailApp.createLabel(CFG.GMAIL_LABEL);
+    const rows = getAllRows_();
+    const known = new Set(rows.map(r => r.gmail_id).filter(String));
+    const personen = JSON.parse(props_().getProperty('PERSONEN') || '[]');
+    const ich = Session.getEffectiveUser().getEmail().toLowerCase();
+    const q = 'newer_than:' + CFG.GMAIL_TAGE + 'd -label:' + CFG.GMAIL_LABEL_SEARCH +
+      ' -category:promotions -category:social -from:me' +
+      ' {rechnung invoice quittung kaufbeleg receipt "ihre bestellung" bestellbestätigung zahlungsbestätigung "your order"}';
+    const threads = GmailApp.search(q, 0, CFG.GMAIL_MAX_THREADS);
+    const st = { importiert: 0, zusammengefuehrt: 0, uebersprungen: 0, geprueft: 0 };
+
+    for (const thread of threads) {
+      if (Date.now() - start > 4.5 * 60 * 1000) break;
+      for (const msg of thread.getMessages()) {
+        if (known.has(msg.getId())) continue;
+        if (String(msg.getFrom()).toLowerCase().indexOf(ich) >= 0) continue; // selbst gesendet/weitergeleitet
+        st.geprueft++;
+        try {
+          const atts = msg.getAttachments({ includeInlineImages: false })
+            .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000)
+            .slice(0, 3);
+          const kontext = 'E-Mail von ' + msg.getFrom() + ', Betreff: ' + msg.getSubject() +
+            ', empfangen am ' + Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd') + '.';
+
+          if (atts.length) {
+            for (const a of atts) {
+              const mime = a.getContentType();
+              const b64 = Utilities.base64Encode(a.getBytes());
+              const block = mime === 'application/pdf'
+                ? { type: 'document', source: { type: 'base64', media_type: mime, data: b64 } }
+                : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
+              const d = extract_([block, { type: 'text', text: kontext + '\n\n' + prompt_() }]);
+              if (d.ist_beleg && d.betrag != null) st[saveFromMail_(d, b64, mime, msg, personen, rows)]++;
+              else st.uebersprungen++;
             }
+          } else {
+            const text = kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000);
+            const d = extract_([{ type: 'text', text: text }, { type: 'text', text: prompt_() }]);
+            if (d.ist_beleg && d.betrag != null) {
+              const html = '<html><head><meta charset="utf-8"></head><body>' +
+                '<p style="font:12px sans-serif;color:#555">' + escHtml_(kontext) + '</p>' + msg.getBody() + '</body></html>';
+              const pdf = Utilities.newBlob(html, 'text/html', 'mail.html').getAs('application/pdf');
+              st[saveFromMail_(d, Utilities.base64Encode(pdf.getBytes()), 'application/pdf', msg, personen, rows)]++;
+            } else st.uebersprungen++;
           }
-        } else {
-          const text = kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000);
-          const d = extract_([{ type: 'text', text: text }, { type: 'text', text: prompt_() }]);
-          if (d.ist_beleg && d.betrag != null) {
-            const html = '<html><head><meta charset="utf-8"></head><body>' +
-              '<p style="font:12px sans-serif;color:#555">' + escHtml_(kontext) + '</p>' + msg.getBody() + '</body></html>';
-            const pdf = Utilities.newBlob(html, 'text/html', 'mail.html').getAs('application/pdf');
-            saveFromMail_(d, Utilities.base64Encode(pdf.getBytes()), 'application/pdf', msg, personen, rows);
-            importiert++;
-          }
+        } catch (e) {
+          Logger.log('Mail ' + msg.getId() + ': ' + e);
         }
-      } catch (e) {
-        Logger.log('Mail ' + msg.getId() + ': ' + e);
       }
+      thread.addLabel(label);
     }
-    thread.addLabel(label);
+    return st;
+  } finally {
+    cache.remove('gmailImportLaeuft');
   }
-  return { importiert: importiert, geprueft: geprueft };
 }
+
+/* ── Duplikat-Erkennung ── */
+function normH_(s) { return String(s || '').toLowerCase().replace(/\b(gmbh|ag|se|kg|co|ohg|e\.?k|online|shop|de|com)\b/g, '').replace(/[^a-z0-9äöüß]/g, ''); }
+function aehnlicherHaendler_(a, b) {
+  const x = normH_(a), y = normH_(b);
+  if (!x || !y) return false;
+  return x === y || x.indexOf(y) >= 0 || y.indexOf(x) >= 0 || x.slice(0, 5) === y.slice(0, 5);
+}
+function normNr_(s) { return String(s || '').replace(/[^a-z0-9]/gi, '').toLowerCase(); }
+function tageAbstand_(a, b) { return Math.abs(parseDate_(a) - parseDate_(b)) / 864e5; }
+
+function findeGleichenKauf_(d, datum, rows) {
+  const nr = normNr_(d.bestellnummer);
+  return rows.find(r => {
+    if (nr && nr.length >= 4 && normNr_(r.bestellnummer) === nr) return true;
+    return Math.abs(r.betrag - d.betrag) < 0.01 && r.datum && tageAbstand_(r.datum, datum) <= CFG.DUPLIKAT_TAGE &&
+      aehnlicherHaendler_(r.haendler, d.haendler);
+  });
+}
+
+function rang_(art) { const i = BELEG_ARTEN.indexOf(art); return i < 0 ? 99 : i; }
 
 function saveFromMail_(d, b64, mime, msg, personen, rows) {
   const datum = d.datum || Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd');
-  const dup = rows.some(r => r.datum === datum && Math.abs(r.betrag - d.betrag) < 0.01);
+  const vorhanden = findeGleichenKauf_(d, datum, rows);
+
+  if (vorhanden) {
+    // Gleicher Kauf schon im Archiv: kein neuer Beleg. Ist die neue Mail die bessere Unterlage
+    // (z. B. Rechnung statt Bestellbestätigung) und stammt der vorhandene Beleg aus Gmail, Dokument austauschen.
+    if (vorhanden.quelle === 'Gmail' && rang_(d.dokumentart) < rang_(vorhanden.dokumentart || 'bestellbestaetigung')) {
+      ersetzeDokument_(vorhanden, b64, mime, d);
+    } else if (!vorhanden.bestellnummer && d.bestellnummer) {
+      setzeFelder_(vorhanden.id, { bestellnummer: d.bestellnummer });
+      vorhanden.bestellnummer = d.bestellnummer;
+    }
+    return 'zusammengefuehrt';
+  }
+
+  const nahe = rows.some(r => Math.abs(r.betrag - d.betrag) < 0.01 && r.datum && tageAbstand_(r.datum, datum) <= 3);
   const o = saveReceipt({
     datum: datum,
     haendler: d.haendler || '',
@@ -423,13 +479,58 @@ function saveFromMail_(d, b64, mime, msg, personen, rows) {
     inventar: !!d.inventar_vorschlag,
     original_aufheben: false,
     status: 'zu prüfen',
-    notiz: dup ? 'Mögliches Duplikat – gleicher Tag und Betrag existiert bereits.' : '',
+    notiz: nahe ? 'Mögliches Duplikat – ähnlicher Betrag in den Tagen davor/danach.' : '',
     quelle: 'Gmail',
     gmail_id: msg.getId(),
+    bestellnummer: d.bestellnummer,
+    dokumentart: d.dokumentart,
     b64: b64,
     mime: mime
   });
   rows.push(o);
+  return 'importiert';
+}
+
+function ersetzeDokument_(r, b64, mime, d) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    if (r.datei_id) { try { DriveApp.getFileById(r.datei_id).setTrashed(true); } catch (e) { /* schon weg */ } }
+    const file = storeBlob_(Utilities.newBlob(Utilities.base64Decode(b64), mime, 'beleg'), mime, r);
+    const neu = { datei_id: file.getId(), datei_name: file.getName(), mime: mime, dokumentart: d.dokumentart };
+    if (d.bestellnummer) neu.bestellnummer = d.bestellnummer;
+    if (d.bezahlt === false && d.faellig_am && r.bezahlt !== false) { neu.bezahlt = false; neu.faellig_am = d.faellig_am; }
+    setzeFelder_(r.id, neu);
+    Object.assign(r, neu);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* Schreibt einzelne Spalten ohne die übrige Logik von updateReceipt (Dateiname, Erinnerungen). */
+function setzeFelder_(id, felder) {
+  const sh = sheet_();
+  const idx = rowIndex_(id);
+  if (idx < 0) return;
+  Object.keys(felder).forEach(k => {
+    const c = COLS.indexOf(k);
+    if (c < 0) return;
+    let v = felder[k];
+    if (k === 'bezahlt') v = v === false ? 'nein' : 'ja';
+    sh.getRange(idx, c + 1).setValue(v == null ? '' : v);
+  });
+}
+
+/* ── Duplikate bereinigen ── */
+function deleteReceipts(ids) {
+  (ids || []).forEach(id => deleteReceipt(id));
+  return true;
+}
+
+function ensureHeader_() {
+  const sh = sheet_();
+  const cur = sh.getRange(1, 1, 1, COLS.length).getValues()[0];
+  if (cur.join('|') !== COLS.join('|')) sh.getRange(1, 1, 1, COLS.length).setValues([COLS]).setFontWeight('bold');
 }
 
 /* ───────────────────────── Exporte ───────────────────────── */

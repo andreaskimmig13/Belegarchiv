@@ -850,8 +850,13 @@ function renderMehr() {
   $('#main').innerHTML = `
   <section class="card">
     <h3><span>Rechnungen aus Gmail</span></h3>
-    <p class="muted" style="margin:0;font-size:14px">Jeden Morgen um 6 Uhr sucht die App automatisch nach neuen Rechnungsmails und legt sie als „zu prüfen“ ab.</p>
+    <p class="muted" style="margin:0;font-size:14px">Jeden Morgen um 6 Uhr sucht die App automatisch nach neuen Rechnungsmails und legt sie als „zu prüfen“ ab. Mehrere Mails zum selben Kauf werden zu einem Beleg zusammengefasst, Angebote und Werbung übersprungen.</p>
     <button class="btn block" style="margin-top:12px" data-gmail>Jetzt nach Rechnungen suchen</button>
+  </section>
+  <section class="card">
+    <h3><span>Duplikate bereinigen</span></h3>
+    <p class="muted" style="margin:0;font-size:14px">Findet Belege mit gleichem Betrag, ähnlichem Händler und Datum bis 14 Tage auseinander.</p>
+    <button class="btn block" style="margin-top:12px" data-dups>Mögliche Duplikate anzeigen</button>
   </section>
   <section class="card">
     <h3><span>Exporte</span></h3>
@@ -885,9 +890,16 @@ function renderMehr() {
     try {
       const r = await api.runGmailImport();
       const init = await api.getInit(); S.belege = init.belege; updateDatalist();
-      busy(false); toast(r.importiert ? `${r.importiert} Rechnung(en) importiert – bitte prüfen` : 'Keine neuen Rechnungen gefunden');
+      busy(false);
+      if (r.hinweis) { toast(r.hinweis, 'err'); return; }
+      const teile = [];
+      if (r.importiert) teile.push(`${r.importiert} neu`);
+      if (r.zusammengefuehrt) teile.push(`${r.zusammengefuehrt} mit vorhandenen zusammengeführt`);
+      if (r.uebersprungen) teile.push(`${r.uebersprungen} übersprungen`);
+      toast(teile.length ? teile.join(' · ') : 'Keine neuen Rechnungen gefunden');
     } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
   };
+  $('[data-dups]').onclick = () => openDups();
   $$('[data-ex]').forEach(b => b.onclick = async () => {
     const fn = b.dataset.ex, jahr = $('[data-ex-jahr]').value;
     busy('Export wird erstellt …');
@@ -913,6 +925,73 @@ function renderMehr() {
     try { await api.testApi(); busy(false); toast('Verbindung zur Claude API funktioniert ✓'); }
     catch (e) { busy(false); toast(errMsg(e), 'err'); }
   };
+}
+
+/* ───── Duplikate ───── */
+function loadIgnored() { try { return new Set(JSON.parse(localStorage.getItem('belegarchiv.keinDuplikat') || '[]')); } catch (e) { return new Set(); } }
+function saveIgnored(set) { try { localStorage.setItem('belegarchiv.keinDuplikat', JSON.stringify([...set])); } catch (e) { /* egal */ } }
+const normH = s => String(s || '').toLowerCase().replace(/\b(gmbh|ag|se|kg|co|ohg|online|shop|de|com)\b/g, '').replace(/[^a-z0-9äöüß]/g, '');
+function aehnlich(a, b) { const x = normH(a), y = normH(b); return !!x && !!y && (x === y || x.includes(y) || y.includes(x) || x.slice(0, 5) === y.slice(0, 5)); }
+function tage(a, b) { const p = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }; return Math.abs(p(a) - p(b)) / 864e5; }
+const RANG = { rechnung: 0, quittung: 1, zahlungsbestaetigung: 2, bestellbestaetigung: 3 };
+
+function findDups() {
+  const ign = loadIgnored();
+  const list = S.belege.filter(b => b.datum).sort((a, b) => a.datum.localeCompare(b.datum));
+  const parent = {}; const find = x => parent[x] === x ? x : (parent[x] = find(parent[x]));
+  list.forEach(b => parent[b.id] = b.id);
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j];
+    if (tage(a.datum, b.datum) > 14) break;
+    const nr = x => String(x.bestellnummer || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const gleicheNr = nr(a).length >= 4 && nr(a) === nr(b);
+    if (gleicheNr || (Math.abs(a.betrag - b.betrag) < 0.01 && aehnlich(a.haendler, b.haendler))) parent[find(a.id)] = find(b.id);
+  }
+  const groups = {};
+  list.forEach(b => (groups[find(b.id)] = groups[find(b.id)] || []).push(b));
+  return Object.values(groups).filter(g => g.length > 1).filter(g => !ign.has(g.map(b => b.id).sort().join(',')))
+    .map(g => g.sort((a, b) => {
+      const ra = a.quelle === 'Gmail' ? (RANG[a.dokumentart] ?? 5) : -1, rb = b.quelle === 'Gmail' ? (RANG[b.dokumentart] ?? 5) : -1;
+      return ra - rb || (b.status === 'geprüft') - (a.status === 'geprüft') || (a.erfasst_am || '').localeCompare(b.erfasst_am || '');
+    }));
+}
+
+function openDups() {
+  const groups = findDups();
+  const m = $('#modal');
+  const close = () => { m.innerHTML = ''; document.body.style.overflow = ''; };
+  document.body.style.overflow = 'hidden';
+  const row = (b, gi, i) => `<label class="tgl" style="align-items:flex-start">
+      <input type="radio" name="g${gi}" value="${esc(b.id)}" ${i === 0 ? 'checked' : ''} style="display:inline;margin-top:4px;accent-color:var(--accent)">
+      <span class="tl"><b>${esc(b.haendler || 'Unbekannt')} · ${EUR.format(b.betrag)}</b>
+      <small>${fmtDate(b.datum)} · ${esc(b.quelle || '–')}${b.dokumentart ? ' · ' + esc(({ rechnung: 'Rechnung', quittung: 'Quittung', zahlungsbestaetigung: 'Zahlungsbestätigung', bestellbestaetigung: 'Bestellbestätigung' })[b.dokumentart] || b.dokumentart) : ''}${b.status === 'zu prüfen' ? ' · zu prüfen' : ''}</small>
+      ${prodList(b.produkte).length ? `<small>${esc(prodList(b.produkte).join(', '))}</small>` : ''}</span></label>`;
+  m.innerHTML = `<div class="modal"><div class="sheet">
+    <header><h3>Mögliche Duplikate</h3><button data-close aria-label="Schließen">✕</button></header>
+    <div class="sbody">
+      ${groups.length ? `<p class="hint">Pro Gruppe den Beleg wählen, der bleiben soll. „Zusammenführen“ löscht die übrigen samt Datei.</p>
+        ${groups.map((g, gi) => `<div class="card" data-grp="${gi}" style="margin:12px 0;padding:4px 14px 12px">
+          ${g.map((b, i) => row(b, gi, i)).join('')}
+          <div class="grid2" style="margin-top:12px"><button class="btn" data-keep="${gi}">Kein Duplikat</button><button class="btn primary" data-merge="${gi}">Zusammenführen</button></div>
+        </div>`).join('')}` : '<div class="empty">Keine möglichen Duplikate gefunden.</div>'}
+    </div></div></div>`;
+  $('.modal', m).addEventListener('click', e => { if (e.target.classList.contains('modal')) close(); });
+  $('[data-close]', m).onclick = close;
+  const done = gi => { const el = $(`[data-grp="${gi}"]`, m); if (el) el.remove(); if (!$('[data-grp]', m)) $('.sbody', m).innerHTML = '<div class="empty">Alles erledigt ✓</div>'; };
+  $$('[data-keep]', m).forEach(b => b.onclick = () => {
+    const gi = +b.dataset.keep, ign = loadIgnored();
+    ign.add(groups[gi].map(x => x.id).sort().join(',')); saveIgnored(ign); done(gi);
+  });
+  $$('[data-merge]', m).forEach(b => b.onclick = async () => {
+    const gi = +b.dataset.merge, keep = $(`input[name="g${gi}"]:checked`, m).value;
+    const del = groups[gi].map(x => x.id).filter(id => id !== keep);
+    busy('Wird zusammengeführt …');
+    try {
+      await api.deleteReceipts(del);
+      S.belege = S.belege.filter(x => !del.includes(x.id));
+      busy(false); toast(`${del.length} Duplikat${del.length > 1 ? 'e' : ''} gelöscht`); done(gi);
+    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+  });
 }
 
 /* ───── Start ───── */
