@@ -1112,7 +1112,14 @@ function openDups() {
 }
 
 /* ───── Start ───── */
-try { window.top.postMessage('belegarchiv-ready', '*'); } catch (e) { /* nicht eingebettet */ }
+/* Nur direkt oder in der eigenen Startseite anzeigen – nicht eingebettet in fremde Seiten */
+const ERLAUBT = /^https:\/\/(script\.google\.com|([a-z0-9-]+\.)+googleusercontent\.com|andreaskimmig13\.github\.io)$/;
+const fremd = location.ancestorOrigins ? [...location.ancestorOrigins].filter(o => !ERLAUBT.test(o)) : [];
+if (fremd.length) {
+  document.body.innerHTML = '<p style="font:16px sans-serif;padding:40px 20px;text-align:center">Belegarchiv kann nur über die eigene Startseite geöffnet werden.</p>';
+  throw new Error('Einbettung nicht erlaubt: ' + fremd.join(', '));
+}
+try { window.top.postMessage('belegarchiv-ready', 'https://andreaskimmig13.github.io'); } catch (e) { /* nicht eingebettet */ }
 const cached = loadCache();
 if (cached) { Object.assign(S, cached); updateDatalist(); go('erfassen'); }
 api.getInit().then(r => {

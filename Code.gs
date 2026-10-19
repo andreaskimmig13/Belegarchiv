@@ -7,21 +7,21 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
   EXPORT_FOLDER: 'Exporte',
   SHEET_NAME: 'Belege',
   SHEET_TITLE: 'Belegarchiv – Datenbank',
-  GMAIL_LABEL: 'Belegarchiv/importiert',
-  GMAIL_LABEL_SEARCH: 'belegarchiv-importiert',
   DEFAULT_MODEL: 'claude-sonnet-5-5',
   GARANTIE_VORLAUF_TAGE: 28,
   RUECKGABE_VORLAUF_TAGE: 2,
   FAELLIG_VORLAUF_TAGE: 2,
   GMAIL_TAGE: 30,
   GMAIL_MAX_THREADS: 25,
+  GMAIL_MAX_MAILS: 40,
+  VERARBEITET_SHEET: 'Gmail-geprüft',
   DUPLIKAT_TAGE: 14,
   ERSTATTUNG_ERINNERUNG_TAGE: 14,
   ERSTATTUNG_SUCHE_TAGE: 120,
@@ -108,7 +108,7 @@ function setup() {
   p.deleteProperty('GITHUB_REPO');
   p.deleteProperty('ORDNER_URL'); p.deleteProperty('TABELLE_URL'); p.deleteProperty('HEADER_VERSION');
 
-  if (!GmailApp.getUserLabelByName(CFG.GMAIL_LABEL)) GmailApp.createLabel(CFG.GMAIL_LABEL);
+  verarbeitetSheet_(); // Merkliste der bereits geprüften Mails
 
   ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === 'gmailImportTrigger')
@@ -368,6 +368,77 @@ function gmailImportTrigger() { importGmail_(); }
 
 function runGmailImport() { return importGmail_(); }
 
+/* ── Gmail nur lesend: Zugriff über die Gmail-API mit der Berechtigung „gmail.readonly“ ── */
+
+function verarbeitetSheet_() {
+  const ss = SpreadsheetApp.openById(props_().getProperty('SPREADSHEET_ID'));
+  let sh = ss.getSheetByName(CFG.VERARBEITET_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(CFG.VERARBEITET_SHEET);
+    sh.getRange(1, 1, 1, 3).setValues([['mail_id', 'geprueft_am', 'ergebnis']]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.hideSheet();
+  }
+  return sh;
+}
+
+function ladeVerarbeitet_() {
+  const sh = verarbeitetSheet_();
+  const n = sh.getLastRow() - 1;
+  return new Set(n > 0 ? sh.getRange(2, 1, n, 1).getValues().map(r => String(r[0])) : []);
+}
+
+function merkeVerarbeitet_(eintraege) {
+  if (!eintraege.length) return;
+  const sh = verarbeitetSheet_();
+  sh.getRange(sh.getLastRow() + 1, 1, eintraege.length, 3).setValues(eintraege);
+  // Alte Einträge (älter als 90 Tage) entfernen, damit die Liste klein bleibt
+  const n = sh.getLastRow() - 1;
+  if (n > 3000) {
+    const grenze = addDaysIso_(today_(), -90);
+    const rows = sh.getRange(2, 1, n, 3).getValues().filter(r => str_(r[1]).slice(0, 10) >= grenze);
+    sh.getRange(2, 1, n, 3).clearContent();
+    if (rows.length) sh.getRange(2, 1, rows.length, 3).setValues(rows);
+  }
+}
+
+function b64web_(s) { return Utilities.base64DecodeWebSafe(String(s || '').replace(/=+$/, '')); }
+
+/* Liest eine Mail über die Gmail-API und bietet dieselben Methoden wie GmailApp-Nachrichten */
+function ladeMail_(id) {
+  const m = Gmail.Users.Messages.get('me', id, { format: 'full' });
+  const headers = {};
+  (m.payload.headers || []).forEach(h => headers[h.name.toLowerCase()] = h.value);
+  let text = '', html = '';
+  const anhaenge = [];
+  (function walk(part) {
+    if (!part) return;
+    const mime = part.mimeType || '';
+    if (part.filename && part.body && (part.body.attachmentId || part.body.data)) {
+      anhaenge.push({ mime: mime, size: part.body.size || 0, attachmentId: part.body.attachmentId, data: part.body.data, name: part.filename });
+    } else if (mime === 'text/plain' && part.body && part.body.data && !text) {
+      text = Utilities.newBlob(b64web_(part.body.data)).getDataAsString('UTF-8');
+    } else if (mime === 'text/html' && part.body && part.body.data && !html) {
+      html = Utilities.newBlob(b64web_(part.body.data)).getDataAsString('UTF-8');
+    }
+    (part.parts || []).forEach(walk);
+  })(m.payload);
+  if (!text && html) text = html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  return {
+    getId: () => id,
+    getDate: () => new Date(Number(m.internalDate)),
+    getFrom: () => headers['from'] || '',
+    getSubject: () => headers['subject'] || '',
+    getPlainBody: () => text,
+    getBody: () => html || ('<pre>' + escHtml_(text) + '</pre>'),
+    getAttachments: () => anhaenge.map(a => ({
+      getContentType: () => a.mime,
+      getSize: () => a.size,
+      getBytes: () => b64web_(a.data || Gmail.Users.Messages.Attachments.get('me', id, a.attachmentId).data)
+    }))
+  };
+}
+
 function importGmail_() {
   ensureSetup_();
   ensureHeader_();
@@ -378,68 +449,72 @@ function importGmail_() {
   if (cache.get('gmailImportLaeuft')) return { importiert: 0, geprueft: 0, hinweis: 'Es läuft bereits eine Suche – bitte in ein paar Minuten erneut versuchen.' };
   cache.put('gmailImportLaeuft', '1', 360);
 
+  const erledigt = [];
   try {
     const start = Date.now();
-    const label = GmailApp.getUserLabelByName(CFG.GMAIL_LABEL) || GmailApp.createLabel(CFG.GMAIL_LABEL);
     const rows = getAllRows_();
-    const known = new Set(rows.map(r => r.gmail_id).filter(String));
+    const known = ladeVerarbeitet_();
+    rows.forEach(r => { if (r.gmail_id) known.add(r.gmail_id); });
     const personen = JSON.parse(props_().getProperty('PERSONEN') || '[]');
-    const ich = Session.getEffectiveUser().getEmail().toLowerCase();
-    const q = 'newer_than:' + CFG.GMAIL_TAGE + 'd -label:' + CFG.GMAIL_LABEL_SEARCH +
-      ' -category:promotions -category:social -from:me' +
+    let ich = '';
+    try { ich = String(Gmail.Users.getProfile('me').emailAddress || '').toLowerCase(); } catch (e) { ich = ''; }
+    const q = 'newer_than:' + CFG.GMAIL_TAGE + 'd -category:promotions -category:social -from:me -in:sent -in:drafts' +
       ' {rechnung invoice quittung kaufbeleg receipt "ihre bestellung" bestellbestätigung zahlungsbestätigung "your order"' +
-    ' erstattung rückerstattung rückzahlung gutschrift refund "retoure"}';
-    const threads = GmailApp.search(q, 0, CFG.GMAIL_MAX_THREADS);
+      ' erstattung rückerstattung rückzahlung gutschrift refund "retoure"}';
+    const ids = (Gmail.Users.Messages.list('me', { q: q, maxResults: 100 }).messages || [])
+      .map(m => m.id).filter(id => !known.has(id)).slice(0, CFG.GMAIL_MAX_MAILS);
     const st = { importiert: 0, zusammengefuehrt: 0, uebersprungen: 0, erstattungen: 0, geprueft: 0 };
 
-    for (const thread of threads) {
+    for (const id of ids) {
       if (Date.now() - start > 4.5 * 60 * 1000) break;
-      for (const msg of thread.getMessages()) {
-        if (known.has(msg.getId())) continue;
-        if (String(msg.getFrom()).toLowerCase().indexOf(ich) >= 0) continue; // selbst gesendet/weitergeleitet
+      let ergebnis = 'uebersprungen';
+      try {
+        const msg = ladeMail_(id);
+        if (ich && String(msg.getFrom()).toLowerCase().indexOf(ich) >= 0) { erledigt.push([id, now_(), 'eigene Mail']); continue; }
         st.geprueft++;
-        try {
-          const atts = msg.getAttachments({ includeInlineImages: false })
-            .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000)
-            .slice(0, 3);
-          const weitergeleitet = /^\s*(wg|fw|fwd)\s*:/i.test(msg.getSubject()) ||
-            /(weitergeleitete nachricht|forwarded message|ursprüngliche nachricht|original message)/i.test(msg.getPlainBody().slice(0, 4000));
-          const kontext = 'E-Mail von ' + msg.getFrom() + ', Betreff: ' + msg.getSubject() +
-            ', empfangen am ' + Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd') + '.' +
-            (weitergeleitet ? ' ACHTUNG: Diese Mail wurde weitergeleitet. Nur als Beleg werten, wenn eindeutig eine Rechnung oder Quittung über einen getätigten Kauf enthalten ist – nicht bei Angeboten, Anfragen oder Diskussionen über Preise.' : '');
-          const ok = d => d.ist_beleg && d.betrag != null && (!weitergeleitet || d.dokumentart === 'rechnung' || d.dokumentart === 'quittung');
+        const atts = msg.getAttachments()
+          .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000)
+          .slice(0, 3);
+        const weitergeleitet = /^\s*(wg|fw|fwd)\s*:/i.test(msg.getSubject()) ||
+          /(weitergeleitete nachricht|forwarded message|ursprüngliche nachricht|original message)/i.test(msg.getPlainBody().slice(0, 4000));
+        const kontext = 'E-Mail von ' + msg.getFrom() + ', Betreff: ' + msg.getSubject() +
+          ', empfangen am ' + Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd') + '.' +
+          (weitergeleitet ? ' ACHTUNG: Diese Mail wurde weitergeleitet. Nur als Beleg werten, wenn eindeutig eine Rechnung oder Quittung über einen getätigten Kauf enthalten ist – nicht bei Angeboten, Anfragen oder Diskussionen über Preise.' : '');
+        const ok = d => d.ist_beleg && d.betrag != null && (!weitergeleitet || d.dokumentart === 'rechnung' || d.dokumentart === 'quittung');
 
-          if (atts.length) {
-            for (const a of atts) {
-              const mime = a.getContentType();
-              const b64 = Utilities.base64Encode(a.getBytes());
-              const block = mime === 'application/pdf'
-                ? { type: 'document', source: { type: 'base64', media_type: mime, data: b64 } }
-                : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
-              const d = extract_([block, { type: 'text', text: kontext + '\n\n' + prompt_() }]);
-              if (d.dokumentart === 'erstattung') { st[verbucheErstattung_(d, msg, rows)]++; continue; }
-              if (ok(d)) st[saveFromMail_(d, b64, mime, msg, personen, rows)]++;
-              else st.uebersprungen++;
-            }
-          } else {
-            const text = kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000);
-            const d = extract_([{ type: 'text', text: text }, { type: 'text', text: prompt_() }]);
-            if (d.dokumentart === 'erstattung') st[verbucheErstattung_(d, msg, rows)]++;
-            else if (ok(d)) {
-              const html = '<html><head><meta charset="utf-8"></head><body>' +
-                '<p style="font:12px sans-serif;color:#555">' + escHtml_(kontext) + '</p>' + msg.getBody() + '</body></html>';
-              const pdf = Utilities.newBlob(html, 'text/html', 'mail.html').getAs('application/pdf');
-              st[saveFromMail_(d, Utilities.base64Encode(pdf.getBytes()), 'application/pdf', msg, personen, rows)]++;
-            } else st.uebersprungen++;
+        if (atts.length) {
+          for (const a of atts) {
+            const mime = a.getContentType();
+            const b64 = Utilities.base64Encode(a.getBytes());
+            const block = mime === 'application/pdf'
+              ? { type: 'document', source: { type: 'base64', media_type: mime, data: b64 } }
+              : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
+            const d = extract_([block, { type: 'text', text: kontext + '\n\n' + prompt_() }]);
+            if (d.dokumentart === 'erstattung') ergebnis = verbucheErstattung_(d, msg, rows);
+            else if (ok(d)) ergebnis = saveFromMail_(d, b64, mime, msg, personen, rows);
+            else ergebnis = 'uebersprungen';
+            st[ergebnis]++;
           }
-        } catch (e) {
-          Logger.log('Mail ' + msg.getId() + ': ' + e);
+        } else {
+          const text = kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000);
+          const d = extract_([{ type: 'text', text: text }, { type: 'text', text: prompt_() }]);
+          if (d.dokumentart === 'erstattung') ergebnis = verbucheErstattung_(d, msg, rows);
+          else if (ok(d)) {
+            const html = '<html><head><meta charset="utf-8"></head><body>' +
+              '<p style="font:12px sans-serif;color:#555">' + escHtml_(kontext) + '</p>' + msg.getBody() + '</body></html>';
+            const pdf = Utilities.newBlob(html, 'text/html', 'mail.html').getAs('application/pdf');
+            ergebnis = saveFromMail_(d, Utilities.base64Encode(pdf.getBytes()), 'application/pdf', msg, personen, rows);
+          } else ergebnis = 'uebersprungen';
+          st[ergebnis]++;
         }
+        erledigt.push([id, now_(), ergebnis]);
+      } catch (e) {
+        Logger.log('Mail ' + id + ': ' + e); // wird beim nächsten Lauf erneut versucht
       }
-      thread.addLabel(label);
     }
     return st;
   } finally {
+    try { merkeVerarbeitet_(erledigt); } catch (e) { Logger.log(e); }
     cache.remove('gmailImportLaeuft');
   }
 }
