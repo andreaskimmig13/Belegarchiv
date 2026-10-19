@@ -226,6 +226,16 @@ const S = {
 };
 
 /* ───── Hilfen ───── */
+const CACHE_KEY = 'belegarchiv.cache.v1';
+function persist() {
+  try {
+    const { belege, personen, kategorien, hatKey, model, ordnerUrl, tabelleUrl, appVersion } = S;
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ belege: belege.filter(b => !b._pending), personen, kategorien, hatKey, model, ordnerUrl, tabelleUrl, appVersion }));
+  } catch (e) { /* ohne Zwischenspeicher weiter */ }
+}
+function loadCache() { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch (e) { return null; } }
+function busyUi() { const ae = document.activeElement; return !!(S.capture || $('#modal').innerHTML || (ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))); }
+function rerender() { if (!busyUi()) { const y = window.scrollY; go(S.tab); window.scrollTo(0, y); } }
 function loadHidden() { try { return new Set(JSON.parse(localStorage.getItem('belegarchiv.hiddenKats') || '[]')); } catch (e) { return new Set(); } }
 function saveHidden(set) { try { localStorage.setItem('belegarchiv.hiddenKats', JSON.stringify([...set])); } catch (e) { /* ohne Speicher weiter */ } }
 const pad = n => String(n).padStart(2, '0');
@@ -546,18 +556,39 @@ function fillCapture(data) {
     <div class="actions"><button class="btn" data-cancel>Verwerfen</button><button class="btn primary" data-save>Speichern</button></div>`;
   wireForm(slot, null);
   $('[data-cancel]', slot).onclick = () => { S.capture = null; renderErfassen(); };
-  $('[data-save]', slot).onclick = async () => {
+  $('[data-save]', slot).onclick = () => {
     const o = readForm(slot); const err = validate(o); if (err) { toast(err, 'err'); return; }
-    busy('Wird gespeichert …');
-    try {
-      if (cap.pages.length === 1) { o.b64 = cap.pages[0].b64; o.mime = cap.pages[0].mime; }
-      else if (cap.pages.length > 1) { o.b64 = pagesToPdf(cap.pages); o.mime = 'application/pdf'; }
-      const saved = await api.saveReceipt(o);
-      S.belege.push(saved); updateDatalist(); S.capture = null;
-      busy(false); toast('Beleg gespeichert ✓'); renderErfassen();
-    } catch (e) { busy(false); toast('Speichern fehlgeschlagen: ' + errMsg(e), 'err'); }
+    if (cap.pages.length === 1) { o.b64 = cap.pages[0].b64; o.mime = cap.pages[0].mime; }
+    else if (cap.pages.length > 1) { o.b64 = pagesToPdf(cap.pages); o.mime = 'application/pdf'; }
+    S.capture = null;
+    saveInBackground(o);
+    toast('Beleg wird gespeichert …');
+    renderErfassen();
   };
 }
+
+/* Speichern im Hintergrund: der Beleg erscheint sofort, der Server arbeitet weiter */
+function saveInBackground(o, tempId) {
+  const id = tempId || 'tmp-' + Date.now();
+  let b = S.belege.find(x => x.id === id);
+  if (!b) {
+    b = Object.assign({}, o, { id, _pending: true, _payload: o, status: 'geprüft', quelle: o.quelle || 'Foto',
+      erfasst_am: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      personen: personList(o.personen).join(', '), produkte: prodList(o.produkte).join('; ') });
+    delete b.b64;
+    S.belege.push(b);
+  }
+  b._failed = false; b._pending = true;
+  api.saveReceipt(o).then(saved => {
+    const i = S.belege.findIndex(x => x.id === id);
+    if (i >= 0) S.belege[i] = saved; else S.belege.push(saved);
+    updateDatalist(); persist(); rerender(); toast('Beleg gespeichert ✓');
+  }).catch(e => {
+    b._failed = true; rerender();
+    toast('Speichern fehlgeschlagen – im Archiv antippen, um es erneut zu versuchen', 'err');
+  });
+}
+window.addEventListener('beforeunload', e => { if (S.belege.some(b => b._pending && !b._failed)) { e.preventDefault(); e.returnValue = ''; } });
 
 /* Mehrere JPEG-Seiten zu einem PDF zusammenfügen (ohne externe Bibliothek) */
 function pagesToPdf(pages) {
@@ -600,12 +631,12 @@ async function prepareFile(file) {
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Das Bild konnte nicht geladen werden.')); i.src = url; });
-    const max = 2000; const sc = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const max = 1600; const sc = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
     const c = document.createElement('canvas');
     c.width = Math.round(img.naturalWidth * sc); c.height = Math.round(img.naturalHeight * sc);
     const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0, c.width, c.height);
-    const dataUrl = c.toDataURL('image/jpeg', 0.85);
+    const dataUrl = c.toDataURL('image/jpeg', 0.8);
     return { b64: dataUrl.split(',')[1], mime: 'image/jpeg', preview: dataUrl, w: c.width, h: c.height };
   } finally { URL.revokeObjectURL(url); }
 }
@@ -699,6 +730,7 @@ function renderResults() {
 }
 function cardHtml(b) {
   const heute = todayIso(); const badges = [];
+  if (b._pending) badges.push(b._failed ? '<span class="badge warn" style="background:var(--danger-soft);color:var(--danger)">Nicht gespeichert – antippen</span>' : '<span class="badge"><span class="spin" style="width:10px;height:10px;border-width:2px"></span> wird gespeichert</span>');
   if (b.status === 'zu prüfen') badges.push('<span class="badge warn">Zu prüfen</span>');
   if (b.garantie_bis && b.garantie_bis >= heute) badges.push(`<span class="badge ok">Garantie bis ${fmtDate(b.garantie_bis)}</span>`);
   if (b.rueckgabe_bis && b.rueckgabe_bis >= heute) badges.push(`<span class="badge warn">Rückgabe bis ${fmtDate(b.rueckgabe_bis)}</span>`);
@@ -717,7 +749,17 @@ function cardHtml(b) {
       ${badges.length ? `<span class="badges">${badges.join('')}</span>` : ''}
     </span></button>`;
 }
-function wireList(root) { $$('.item[data-id]', root).forEach(el => el.onclick = () => openDetail(el.dataset.id)); }
+function wireList(root) {
+  $$('.item[data-id]', root).forEach(el => el.onclick = () => {
+    const b = S.belege.find(x => x.id === el.dataset.id);
+    if (b && b._pending) {
+      if (b._failed) { toast('Neuer Versuch …'); saveInBackground(b._payload, b.id); rerender(); }
+      else toast('Wird noch gespeichert …');
+      return;
+    }
+    openDetail(el.dataset.id);
+  });
+}
 
 /* ───── Detail ───── */
 function openDetail(id) {
@@ -747,23 +789,27 @@ function openDetail(id) {
       } else prev.innerHTML = `<a class="btn" href="${esc(r.url)}" target="_blank">${ICON.file} PDF öffnen</a>`;
     }).catch(() => { const prev = $('[data-prev]', m); if (prev) prev.innerHTML = '<p class="muted">Bild konnte nicht geladen werden</p>'; });
   }
-  $('[data-save]', m).onclick = async () => {
+  $('[data-save]', m).onclick = () => {
     const o = readForm($('.sbody', m)); const err = validate(o); if (err) { toast(err, 'err'); return; }
-    busy('Wird gespeichert …');
-    try {
-      const u = await api.updateReceipt(id, o);
-      const i = S.belege.findIndex(x => x.id === id); S.belege[i] = u; updateDatalist();
-      busy(false); close(); toast('Änderungen gespeichert ✓'); go(S.tab);
-    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+    const i = S.belege.findIndex(x => x.id === id), alt = S.belege[i];
+    S.belege[i] = Object.assign({}, alt, o, { personen: o.personen.join(', '), produkte: o.produkte.join('; ') });
+    close(); rerender(); toast('Gespeichert ✓');
+    api.updateReceipt(id, o).then(u => {
+      const j = S.belege.findIndex(x => x.id === id); if (j >= 0) S.belege[j] = u;
+      updateDatalist(); persist(); rerender();
+    }).catch(e => {
+      const j = S.belege.findIndex(x => x.id === id); if (j >= 0) S.belege[j] = alt;
+      rerender(); toast('Änderung nicht gespeichert: ' + errMsg(e), 'err');
+    });
   };
   $('[data-del]', m).onclick = async () => {
     if (!confirm('Diesen Beleg wirklich löschen? Das Bild wandert in den Drive-Papierkorb.')) return;
-    busy('Wird gelöscht …');
-    try {
-      await api.deleteReceipt(id);
-      S.belege = S.belege.filter(x => x.id !== id);
-      busy(false); close(); toast('Beleg gelöscht'); go(S.tab);
-    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+    const alt = S.belege.find(x => x.id === id);
+    S.belege = S.belege.filter(x => x.id !== id);
+    close(); rerender(); toast('Beleg gelöscht');
+    api.deleteReceipt(id).then(() => persist()).catch(e => {
+      S.belege.push(alt); rerender(); toast('Löschen fehlgeschlagen: ' + errMsg(e), 'err');
+    });
   };
 }
 
@@ -1066,11 +1112,17 @@ function openDups() {
 }
 
 /* ───── Start ───── */
+try { window.top.postMessage('belegarchiv-ready', '*'); } catch (e) { /* nicht eingebettet */ }
+const cached = loadCache();
+if (cached) { Object.assign(S, cached); updateDatalist(); go('erfassen'); }
 api.getInit().then(r => {
+  const pending = S.belege.filter(b => b._pending);
   Object.assign(S, r);
-  updateDatalist();
-  go('erfassen');
+  S.belege = S.belege.concat(pending);
+  updateDatalist(); persist();
+  if (cached) rerender(); else go('erfassen');
 }).catch(e => {
+  if (cached) { toast('Daten konnten nicht aktualisiert werden: ' + errMsg(e), 'err'); return; }
   $('#main').innerHTML = `<div class="card"><h2 style="font-size:18px">Noch nicht eingerichtet</h2><p class="muted">${esc(errMsg(e))}</p></div>`;
 });
 </script>

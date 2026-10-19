@@ -7,7 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -106,6 +106,7 @@ function setup() {
   if (!p.getProperty('KATEGORIEN')) p.setProperty('KATEGORIEN', JSON.stringify(DEFAULT_KATEGORIEN));
   if (!p.getProperty('MODEL')) p.setProperty('MODEL', CFG.DEFAULT_MODEL);
   p.deleteProperty('GITHUB_REPO');
+  p.deleteProperty('ORDNER_URL'); p.deleteProperty('TABELLE_URL'); p.deleteProperty('HEADER_VERSION');
 
   if (!GmailApp.getUserLabelByName(CFG.GMAIL_LABEL)) GmailApp.createLabel(CFG.GMAIL_LABEL);
 
@@ -131,20 +132,25 @@ function doGet() {
     .setFaviconUrl('https://andreaskimmig13.github.io/Belegarchiv/favicon.png')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
     .addMetaTag('apple-mobile-web-app-capable', 'yes')
-    .addMetaTag('mobile-web-app-capable', 'yes');
+    .addMetaTag('mobile-web-app-capable', 'yes')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL); // Einbetten in die Startseite (ohne Google-Hinweisleiste)
 }
 
 function getInit() {
   ensureSetup_();
-  ensureHeader_();
   const p = props_();
+  if (p.getProperty('HEADER_VERSION') !== APP_VERSION) { ensureHeader_(); p.setProperty('HEADER_VERSION', APP_VERSION); }
+  if (!p.getProperty('ORDNER_URL')) {
+    p.setProperty('ORDNER_URL', DriveApp.getFolderById(p.getProperty('ROOT_FOLDER_ID')).getUrl());
+    p.setProperty('TABELLE_URL', SpreadsheetApp.openById(p.getProperty('SPREADSHEET_ID')).getUrl());
+  }
   return {
     personen: JSON.parse(p.getProperty('PERSONEN') || '[]'),
     kategorien: JSON.parse(p.getProperty('KATEGORIEN') || '[]'),
     hatKey: !!p.getProperty('ANTHROPIC_API_KEY'),
     model: p.getProperty('MODEL') || CFG.DEFAULT_MODEL,
-    ordnerUrl: DriveApp.getFolderById(p.getProperty('ROOT_FOLDER_ID')).getUrl(),
-    tabelleUrl: SpreadsheetApp.openById(p.getProperty('SPREADSHEET_ID')).getUrl(),
+    ordnerUrl: p.getProperty('ORDNER_URL'),
+    tabelleUrl: p.getProperty('TABELLE_URL'),
     appVersion: APP_VERSION,
     belege: getAllRows_()
   };

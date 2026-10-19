@@ -2,33 +2,48 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Belegarchiv</title>
 <meta name="apple-mobile-web-app-title" content="Belegarchiv">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="application-name" content="Belegarchiv">
 <meta name="theme-color" content="#0f766e">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="manifest" href="manifest.json">
 <style>
-  body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
-    font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f4f0;color:#1c1e21}
-  img{width:88px;height:88px;border-radius:20px}
-  a{color:#0f766e;font-weight:600}
-  @media (prefers-color-scheme: dark){body{background:#111315;color:#ebe9e4}a{color:#2dd4bf}}
+  html,body{margin:0;height:100%;background:#f5f4f0;overflow:hidden}
+  iframe{position:fixed;inset:0;width:100%;height:100%;border:0;background:transparent}
+  #load{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+    font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1c1e21;background:#f5f4f0;transition:opacity .25s}
+  #load img{width:88px;height:88px;border-radius:20px}
+  #load a{display:none;color:#fff;background:#0f766e;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:600}
+  #load.slow a{display:inline-block}
+  #load.slow p.hint{display:block}
+  p.hint{display:none;max-width:280px;text-align:center;color:#6b7078;font-size:14px;margin:0}
+  @media (prefers-color-scheme: dark){html,body,#load{background:#111315;color:#ebe9e4}#load a{background:#2dd4bf;color:#06201d}}
 </style>
 </head>
 <body>
-<img src="icon-192.png" alt="">
-<p>Belegarchiv wird geöffnet …</p>
-<p><a id="go" href="#">Falls nichts passiert, hier tippen</a></p>
+<iframe id="app" title="Belegarchiv" allow="camera; clipboard-write"></iframe>
+<div id="load">
+  <img src="icon-192.png" alt="">
+  <p style="margin:0">Belegarchiv wird geöffnet …</p>
+  <p class="hint">Das dauert ungewöhnlich lange. Falls die App nicht erscheint, direkt öffnen:</p>
+  <a id="go" target="_top">App direkt öffnen</a>
+</div>
 <script>
   var APP = 'https://script.google.com/macros/s/AKfycbzQpherFVwEJWKd9qz1iChFlyOsXedU8LICrumCl2Ru58Aqq0P21hmV2Mf5whJwa0gD/exec';
   document.getElementById('go').href = APP;
-  var standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-  if (standalone || !/[?&]stay/.test(location.search)) setTimeout(function () { location.replace(APP); }, 150);
+  if (/[?&]direkt/.test(location.search)) { location.replace(APP); }
+  else {
+    var load = document.getElementById('load');
+    document.getElementById('app').src = APP;
+    window.addEventListener('message', function (e) {
+      if (e.data === 'belegarchiv-ready') { load.style.opacity = 0; setTimeout(function () { load.style.display = 'none'; }, 260); }
+    });
+    setTimeout(function () { if (load.style.display !== 'none') load.className = 'slow'; }, 12000);
+  }
 </script>
 </body>
 </html>
