@@ -313,7 +313,7 @@ function formHtml(d, mode) {
   <div class="toggles">
     ${toggle('original_aufheben', 'Original aufheben', 'Thermopapier verblasst – Papierbon zusätzlich behalten', !!d.original_aufheben)}
     ${toggle('inventar', 'Hausrat-Inventar', 'Für die Inventarliste der Versicherung', !!d.inventar)}
-    ${mode === 'edit' ? toggle('geprueft', 'Geprüft', 'Erkannte Daten kontrolliert', d.status !== 'zu prüfen') : ''}
+    ${mode === 'edit' ? toggle('geprueft', 'Geprüft', 'Beim Speichern als geprüft markieren – ausschalten, um ihn auf der Prüfliste zu lassen', true) : ''}
   </div>
   <label class="fld"><span>Notiz</span><textarea name="notiz" rows="2" placeholder="optional">${esc(d.notiz)}</textarea></label>`;
 }
@@ -1019,6 +1019,8 @@ function openDups() {
     try {
       await api.deleteReceipts(del);
       S.belege = S.belege.filter(x => !del.includes(x.id));
+      const k = S.belege.find(x => x.id === keep);
+      if (k && k.status === 'zu prüfen') { const u = await api.updateReceipt(keep, { status: 'geprüft' }); Object.assign(k, u); }
       busy(false); toast(`${del.length} Duplikat${del.length > 1 ? 'e' : ''} gelöscht`); done(gi);
     } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
   });
