@@ -7,7 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.1';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -391,7 +391,14 @@ function merkeVerarbeitet_(eintraege) {
   }
 }
 
-function b64web_(s) { return Utilities.base64DecodeWebSafe(String(s || '').replace(/=+$/, '')); }
+/* Die Gmail-API liefert Inhalte in Apps Script meist schon als Byte-Array, manchmal als Base64-Text – beides abfangen */
+function b64web_(x) {
+  if (x == null) return [];
+  if (Array.isArray(x) || (typeof x === 'object' && typeof x.length === 'number')) return x;
+  let s = String(x).replace(/\s/g, '');
+  while (s.length % 4) s += '=';
+  return Utilities.base64DecodeWebSafe(s);
+}
 
 /* Liest eine Mail über die Gmail-API und bietet dieselben Methoden wie GmailApp-Nachrichten */
 function ladeMail_(id) {
@@ -452,7 +459,7 @@ function importGmail_() {
       ' erstattung rückerstattung rückzahlung gutschrift refund "retoure"}';
     const ids = (Gmail.Users.Messages.list('me', { q: q, maxResults: 100 }).messages || [])
       .map(m => m.id).filter(id => !known.has(id)).slice(0, CFG.GMAIL_MAX_MAILS);
-    const st = { importiert: 0, zusammengefuehrt: 0, uebersprungen: 0, erstattungen: 0, geprueft: 0 };
+    const st = { importiert: 0, zusammengefuehrt: 0, uebersprungen: 0, erstattungen: 0, geprueft: 0, fehler: 0, gefunden: ids.length };
 
     for (const id of ids) {
       if (Date.now() - start > 4.5 * 60 * 1000) break;
@@ -499,6 +506,8 @@ function importGmail_() {
         erledigt.push([id, now_(), ergebnis]);
       } catch (e) {
         Logger.log('Mail ' + id + ': ' + e); // wird beim nächsten Lauf erneut versucht
+        st.fehler++;
+        if (!st.fehlertext) st.fehlertext = String(e && e.message || e).slice(0, 200);
       }
     }
     return st;

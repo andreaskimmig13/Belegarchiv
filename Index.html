@@ -1014,7 +1014,8 @@ function renderMehr() {
       if (r.zusammengefuehrt) teile.push(`${r.zusammengefuehrt} mit vorhandenen zusammengeführt`);
       if (r.erstattungen) teile.push(`${r.erstattungen} Erstattung${r.erstattungen > 1 ? 'en' : ''} verbucht`);
       if (r.uebersprungen) teile.push(`${r.uebersprungen} übersprungen`);
-      toast(teile.length ? teile.join(' · ') : 'Keine neuen Rechnungen gefunden');
+      if (r.fehler) { toast(`${r.fehler} Mail${r.fehler > 1 ? 's' : ''} konnte${r.fehler > 1 ? 'n' : ''} nicht gelesen werden: ${r.fehlertext || 'unbekannter Fehler'}`, 'err'); }
+      if (!r.fehler) toast(teile.length ? teile.join(' · ') : (r.gefunden ? 'Keine neuen Rechnungen gefunden' : 'Keine neuen passenden Mails in den letzten 30 Tagen'));
     } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
   };
   $('[data-dups]').onclick = () => openDups();
