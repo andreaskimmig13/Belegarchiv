@@ -1001,22 +1001,27 @@ function renderMehr() {
     <div class="reslinks"><a class="btn" href="${esc(S.ordnerUrl)}" target="_blank">Belegordner</a><a class="btn" href="${esc(S.tabelleUrl)}" target="_blank">Datentabelle</a></div>
   </section>`;
 
-  $('[data-gmail]').onclick = async () => {
+  const gb = $('[data-gmail]');
+  if (S.gmailLaeuft) { gb.disabled = true; gb.innerHTML = '<span class="spin"></span> Suche läuft im Hintergrund …'; }
+  gb.onclick = () => {
     if (!S.hatKey) { toast('Bitte zuerst den API-Schlüssel hinterlegen.', 'err'); return; }
-    busy('Postfach wird durchsucht …');
-    try {
-      const r = await api.runGmailImport();
-      const init = await api.getInit(); S.belege = init.belege; updateDatalist();
-      busy(false);
+    if (S.gmailLaeuft) return;
+    S.gmailLaeuft = true;
+    gb.disabled = true; gb.innerHTML = '<span class="spin"></span> Suche läuft im Hintergrund …';
+    toast('Suche gestartet – du kannst die App währenddessen normal nutzen');
+    api.runGmailImport().then(async r => {
+      try { const init = await api.getInit(); const pend = S.belege.filter(b => b._pending); S.belege = init.belege.concat(pend); updateDatalist(); persist(); } catch (e) { /* Liste später */ }
+      S.gmailLaeuft = false; rerender();
       if (r.hinweis) { toast(r.hinweis, 'err'); return; }
       const teile = [];
       if (r.importiert) teile.push(`${r.importiert} neu`);
-      if (r.zusammengefuehrt) teile.push(`${r.zusammengefuehrt} mit vorhandenen zusammengeführt`);
+      if (r.zusammengefuehrt) teile.push(`${r.zusammengefuehrt} zusammengeführt`);
       if (r.erstattungen) teile.push(`${r.erstattungen} Erstattung${r.erstattungen > 1 ? 'en' : ''} verbucht`);
-      if (r.uebersprungen) teile.push(`${r.uebersprungen} übersprungen`);
-      if (r.fehler) { toast(`${r.fehler} Mail${r.fehler > 1 ? 's' : ''} konnte${r.fehler > 1 ? 'n' : ''} nicht gelesen werden: ${r.fehlertext || 'unbekannter Fehler'}`, 'err'); }
-      if (!r.fehler) toast(teile.length ? teile.join(' · ') : (r.gefunden ? 'Keine neuen Rechnungen gefunden' : 'Keine neuen passenden Mails in den letzten 30 Tagen'));
-    } catch (e) { busy(false); toast('Fehler: ' + errMsg(e), 'err'); }
+      if (r.uebersprungen) teile.push(`${r.uebersprungen} aussortiert`);
+      if (r.rest) teile.push(`${r.rest} weitere beim nächsten Lauf`);
+      if (r.fehler) toast(`${r.fehler} Mail${r.fehler > 1 ? 's' : ''} konnte${r.fehler > 1 ? 'n' : ''} nicht gelesen werden: ${r.fehlertext || 'unbekannter Fehler'}`, 'err');
+      else toast(teile.length ? teile.join(' · ') : (r.gefunden ? 'Keine neuen Rechnungen gefunden' : 'Keine neuen passenden Mails in den letzten 30 Tagen'));
+    }).catch(e => { S.gmailLaeuft = false; rerender(); toast('Fehler: ' + errMsg(e), 'err'); });
   };
   $('[data-dups]').onclick = () => openDups();
   $$('[data-ex]').forEach(b => b.onclick = async () => {

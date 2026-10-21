@@ -7,7 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.9.1';
+const APP_VERSION = '1.10.0';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -20,7 +20,10 @@ const CFG = {
   FAELLIG_VORLAUF_TAGE: 2,
   GMAIL_TAGE: 30,
   GMAIL_MAX_THREADS: 25,
-  GMAIL_MAX_MAILS: 40,
+  GMAIL_MAX_MAILS: 60,          // höchstens so viele neue Mails pro Lauf vorsortieren
+  GMAIL_MAX_KANDIDATEN: 25,     // höchstens so viele davon ausführlich auslesen
+  PARALLEL: 5,                  // gleichzeitige KI-Anfragen
+  TRIAGE_MODEL: 'claude-haiku-5-5',
   VERARBEITET_SHEET: 'Gmail-geprüft',
   DUPLIKAT_TAGE: 14,
   ERSTATTUNG_ERINNERUNG_TAGE: 14,
@@ -205,7 +208,10 @@ function prompt_() {
 }
 
 function extract_(content) {
-  const txt = callClaude_(content);
+  return normExtract_(callClaude_(content));
+}
+
+function normExtract_(txt) {
   const s = txt.indexOf('{'), e = txt.lastIndexOf('}');
   if (s < 0 || e < s) throw new Error('Die KI-Antwort konnte nicht gelesen werden.');
   const d = JSON.parse(txt.slice(s, e + 1));
@@ -225,21 +231,25 @@ function extract_(content) {
   return d;
 }
 
-function callClaude_(content) {
+function claudeRequest_(content, model, maxTokens) {
   const p = props_();
   const key = p.getProperty('ANTHROPIC_API_KEY');
   if (!key) throw new Error('Kein API-Schlüssel hinterlegt (Mehr → Einstellungen).');
-  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+  return {
+    url: 'https://api.anthropic.com/v1/messages',
     method: 'post',
     contentType: 'application/json',
     muteHttpExceptions: true,
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
     payload: JSON.stringify({
-      model: p.getProperty('MODEL') || CFG.DEFAULT_MODEL,
-      max_tokens: 1500,
+      model: model || p.getProperty('MODEL') || CFG.DEFAULT_MODEL,
+      max_tokens: maxTokens || 1500,
       messages: [{ role: 'user', content: content }]
     })
-  });
+  };
+}
+
+function claudeAntwort_(res) {
   const code = res.getResponseCode();
   const body = res.getContentText();
   if (code !== 200) {
@@ -249,6 +259,23 @@ function callClaude_(content) {
   }
   const json = JSON.parse(body);
   return (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+}
+
+function callClaude_(content, model, maxTokens) {
+  const req = claudeRequest_(content, model, maxTokens);
+  return claudeAntwort_(UrlFetchApp.fetch(req.url, req));
+}
+
+/* Mehrere KI-Anfragen gleichzeitig; liefert pro Eintrag { text } oder { fehler } */
+function claudeParallel_(contents) {
+  const out = [];
+  for (let i = 0; i < contents.length; i += CFG.PARALLEL) {
+    const reqs = contents.slice(i, i + CFG.PARALLEL).map(c => claudeRequest_(c));
+    UrlFetchApp.fetchAll(reqs).forEach(res => {
+      try { out.push({ text: claudeAntwort_(res) }); } catch (e) { out.push({ fehler: e }); }
+    });
+  }
+  return out;
 }
 
 function testApi() {
@@ -435,6 +462,22 @@ function ladeMail_(id) {
   };
 }
 
+/* Schritt 1: Kopfdaten aller neuen Mails in EINER schnellen KI-Anfrage vorsortieren */
+function vorsortieren_(metas) {
+  if (!metas.length) return {};
+  const liste = metas.map(m => ({ id: m.id, von: m.from, betreff: m.subject, vorschau: m.snippet, anhang: m.anhang }));
+  const prompt = 'Sortiere diese E-Mails für ein Belegarchiv vor. Antworte nur mit einem JSON-Objekt {"<id>": "beleg" | "erstattung" | "nein"}.\n' +
+    '"beleg": Rechnung, Quittung, Kassenbon, Zahlungsbestätigung oder Bestellbestätigung über einen getätigten Kauf mit Betrag.\n' +
+    '"erstattung": Gutschrift, Rückerstattung, Rückzahlung, Retoure verbucht.\n' +
+    '"nein": Werbung, Newsletter, Versand-/Lieferstatus, Angebot, Kostenvoranschlag, Kontoauszug, Mahnung, Kommunikation ohne Kauf.\n' +
+    'Im Zweifel "beleg".\n\n' + JSON.stringify(liste);
+  let txt;
+  try { txt = callClaude_([{ type: 'text', text: prompt }], props_().getProperty('TRIAGE_MODEL') || CFG.TRIAGE_MODEL, 2000); }
+  catch (e) { txt = callClaude_([{ type: 'text', text: prompt }], null, 2000); } // Ersatz: Hauptmodell
+  const s = txt.indexOf('{'), e = txt.lastIndexOf('}');
+  return s >= 0 && e > s ? JSON.parse(txt.slice(s, e + 1)) : {};
+}
+
 function importGmail_() {
   ensureSetup_();
   ensureHeader_();
@@ -448,6 +491,7 @@ function importGmail_() {
   const erledigt = [];
   try {
     const start = Date.now();
+    const zeitUm = () => Date.now() - start > 4 * 60 * 1000;
     const rows = getAllRows_();
     const known = ladeVerarbeitet_();
     rows.forEach(r => { if (r.gmail_id) known.add(r.gmail_id); });
@@ -460,56 +504,95 @@ function importGmail_() {
     const ids = (Gmail.Users.Messages.list('me', { q: q, maxResults: 100 }).messages || [])
       .map(m => m.id).filter(id => !known.has(id)).slice(0, CFG.GMAIL_MAX_MAILS);
     const st = { importiert: 0, zusammengefuehrt: 0, uebersprungen: 0, erstattungen: 0, geprueft: 0, fehler: 0, gefunden: ids.length };
+    if (!ids.length) return st;
 
-    for (const id of ids) {
-      if (Date.now() - start > 4.5 * 60 * 1000) break;
-      let ergebnis = 'uebersprungen';
+    // 1) Nur Kopfdaten laden (schnell) und eigene Mails aussortieren
+    const metas = [];
+    ids.forEach(id => {
+      try {
+        const m = Gmail.Users.Messages.get('me', id, { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Content-Type'] });
+        const h = {}; (m.payload.headers || []).forEach(x => h[x.name.toLowerCase()] = x.value);
+        const from = h['from'] || '';
+        if (ich && from.toLowerCase().indexOf(ich) >= 0) { erledigt.push([id, now_(), 'eigene Mail']); return; }
+        metas.push({ id: id, from: from, subject: h['subject'] || '', snippet: String(m.snippet || '').slice(0, 220),
+          anhang: /multipart\/mixed/i.test(h['content-type'] || '') });
+      } catch (e) { st.fehler++; if (!st.fehlertext) st.fehlertext = String(e && e.message || e).slice(0, 200); }
+    });
+
+    // 2) Vorsortieren in einer einzigen KI-Anfrage
+    const urteil = {};
+    for (let i = 0; i < metas.length; i += 30) Object.assign(urteil, vorsortieren_(metas.slice(i, i + 30)));
+    const kandidaten = [];
+    metas.forEach(m => {
+      const u = urteil[m.id] || 'beleg';
+      if (u === 'nein') { erledigt.push([m.id, now_(), 'vorsortiert: kein Beleg']); st.uebersprungen++; }
+      else kandidaten.push(m.id);
+    });
+
+    // 3) Kandidaten vollständig laden und Anfragen vorbereiten
+    const aufgaben = [];
+    const proMail = {};
+    kandidaten.slice(0, CFG.GMAIL_MAX_KANDIDATEN).forEach(id => {
+      if (zeitUm()) return;
       try {
         const msg = ladeMail_(id);
-        if (ich && String(msg.getFrom()).toLowerCase().indexOf(ich) >= 0) { erledigt.push([id, now_(), 'eigene Mail']); continue; }
         st.geprueft++;
-        const atts = msg.getAttachments()
-          .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000)
-          .slice(0, 3);
         const weitergeleitet = /^\s*(wg|fw|fwd)\s*:/i.test(msg.getSubject()) ||
           /(weitergeleitete nachricht|forwarded message|ursprüngliche nachricht|original message)/i.test(msg.getPlainBody().slice(0, 4000));
         const kontext = 'E-Mail von ' + msg.getFrom() + ', Betreff: ' + msg.getSubject() +
           ', empfangen am ' + Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd') + '.' +
           (weitergeleitet ? ' ACHTUNG: Diese Mail wurde weitergeleitet. Nur als Beleg werten, wenn eindeutig eine Rechnung oder Quittung über einen getätigten Kauf enthalten ist – nicht bei Angeboten, Anfragen oder Diskussionen über Preise.' : '');
-        const ok = d => d.ist_beleg && d.betrag != null && (!weitergeleitet || d.dokumentart === 'rechnung' || d.dokumentart === 'quittung');
-
+        const atts = msg.getAttachments()
+          .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000)
+          .slice(0, 3);
+        proMail[id] = { offen: 0, ergebnis: 'uebersprungen', fehler: false };
         if (atts.length) {
-          for (const a of atts) {
+          atts.forEach(a => {
             const mime = a.getContentType();
             const b64 = Utilities.base64Encode(a.getBytes());
             const block = mime === 'application/pdf'
               ? { type: 'document', source: { type: 'base64', media_type: mime, data: b64 } }
               : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
-            const d = extract_([block, { type: 'text', text: kontext + '\n\n' + prompt_() }]);
-            if (d.dokumentart === 'erstattung') ergebnis = verbucheErstattung_(d, msg, rows);
-            else if (ok(d)) ergebnis = saveFromMail_(d, b64, mime, msg, personen, rows);
-            else ergebnis = 'uebersprungen';
-            st[ergebnis]++;
-          }
+            aufgaben.push({ id, msg, weitergeleitet, b64, mime, content: [block, { type: 'text', text: kontext + '\n\n' + prompt_() }] });
+            proMail[id].offen++;
+          });
         } else {
-          const text = kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000);
-          const d = extract_([{ type: 'text', text: text }, { type: 'text', text: prompt_() }]);
-          if (d.dokumentart === 'erstattung') ergebnis = verbucheErstattung_(d, msg, rows);
-          else if (ok(d)) {
-            const html = '<html><head><meta charset="utf-8"></head><body>' +
-              '<p style="font:12px sans-serif;color:#555">' + escHtml_(kontext) + '</p>' + msg.getBody() + '</body></html>';
-            const pdf = Utilities.newBlob(html, 'text/html', 'mail.html').getAs('application/pdf');
-            ergebnis = saveFromMail_(d, Utilities.base64Encode(pdf.getBytes()), 'application/pdf', msg, personen, rows);
-          } else ergebnis = 'uebersprungen';
-          st[ergebnis]++;
+          aufgaben.push({ id, msg, weitergeleitet, kontext, content: [{ type: 'text', text: kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000) }, { type: 'text', text: prompt_() }] });
+          proMail[id].offen++;
         }
-        erledigt.push([id, now_(), ergebnis]);
       } catch (e) {
-        Logger.log('Mail ' + id + ': ' + e); // wird beim nächsten Lauf erneut versucht
-        st.fehler++;
+        Logger.log('Mail ' + id + ': ' + e); st.fehler++;
         if (!st.fehlertext) st.fehlertext = String(e && e.message || e).slice(0, 200);
       }
-    }
+    });
+
+    // 4) Auslesen parallel, Ergebnisse nacheinander speichern
+    const antworten = claudeParallel_(aufgaben.map(a => a.content));
+    aufgaben.forEach((a, i) => {
+      const pm = proMail[a.id];
+      try {
+        const r = antworten[i];
+        if (r.fehler) throw r.fehler;
+        const d = normExtract_(r.text);
+        const ok = d.ist_beleg && d.betrag != null && (!a.weitergeleitet || d.dokumentart === 'rechnung' || d.dokumentart === 'quittung');
+        let ergebnis = 'uebersprungen';
+        if (d.dokumentart === 'erstattung') ergebnis = verbucheErstattung_(d, a.msg, rows);
+        else if (ok && a.b64) ergebnis = saveFromMail_(d, a.b64, a.mime, a.msg, personen, rows);
+        else if (ok) {
+          const html = '<html><head><meta charset="utf-8"></head><body>' +
+            '<p style="font:12px sans-serif;color:#555">' + escHtml_(a.kontext) + '</p>' + a.msg.getBody() + '</body></html>';
+          const pdf = Utilities.newBlob(html, 'text/html', 'mail.html').getAs('application/pdf');
+          ergebnis = saveFromMail_(d, Utilities.base64Encode(pdf.getBytes()), 'application/pdf', a.msg, personen, rows);
+        }
+        st[ergebnis]++;
+        if (ergebnis !== 'uebersprungen') pm.ergebnis = ergebnis;
+      } catch (e) {
+        Logger.log('Mail ' + a.id + ': ' + e); pm.fehler = true; st.fehler++;
+        if (!st.fehlertext) st.fehlertext = String(e && e.message || e).slice(0, 200);
+      }
+      if (--pm.offen === 0 && !pm.fehler) erledigt.push([a.id, now_(), pm.ergebnis]);
+    });
+    st.rest = Math.max(0, kandidaten.length - CFG.GMAIL_MAX_KANDIDATEN);
     return st;
   } finally {
     try { merkeVerarbeitet_(erledigt); } catch (e) { Logger.log(e); }
