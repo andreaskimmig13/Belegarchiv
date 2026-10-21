@@ -310,7 +310,7 @@ function formHtml(d, mode) {
   <label class="fld"><span>Zahlungsart</span><select name="zahlungsart">${ZAHLUNG.map(([v, l]) => `<option value="${v}" ${v === (d.zahlungsart || 'unbekannt') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   <div class="toggles" style="margin-top:12px">
     ${toggle('bezahlt', 'Bezahlt', 'Ausschalten für offene Rechnungen', d.bezahlt !== false)}
-    <label class="fld faellig" style="margin:0;padding:10px 0;border-bottom:1px solid var(--line)" ${d.bezahlt !== false ? 'hidden' : ''}><span>Fällig am <small>– Erinnerung 2 Tage vorher im Kalender</small></span><input type="date" name="faellig_am" value="${esc(d.faellig_am)}"></label>
+    <label class="fld faellig" style="margin:0;padding:10px 0;border-bottom:1px solid var(--line)" ${d.bezahlt !== false ? 'hidden' : ''}><span>Fällig am <small>– erscheint vorher unter „Demnächst fällig“</small></span><input type="date" name="faellig_am" value="${esc(d.faellig_am)}"></label>
   </div>
   <div class="grid2">
     <label class="fld"><span>Garantie bis</span><input type="date" name="garantie_bis" value="${esc(d.garantie_bis)}"></label>
@@ -327,7 +327,7 @@ function formHtml(d, mode) {
       <label class="fld"><span>Zurückgegeben am</span><input type="date" name="retoure_am" value="${esc(d.retoure_am || todayIso())}"></label>
     </div>
     <label class="fld"><span>Erstattung</span><select name="erstattung_status">
-      <option value="offen" ${d.erstattung_status !== 'erhalten' ? 'selected' : ''}>Noch offen – Erinnerung nach 14 Tagen</option>
+      <option value="offen" ${d.erstattung_status !== 'erhalten' ? 'selected' : ''}>Noch offen – Hinweis nach 14 Tagen</option>
       <option value="erhalten" ${d.erstattung_status === 'erhalten' ? 'selected' : ''}>Geld ist zurück</option></select></label>
   </div>
   <label class="fld"><span>Steuerlich relevant</span><select name="steuer">${STEUER.map(([v, l]) => `<option value="${v}" ${v === (d.steuer || '') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -431,6 +431,37 @@ function validate(o) {
   return '';
 }
 
+/* ───── Fristen (statt Kalender) ───── */
+function tageBis(iso) { const [y, m, d] = iso.split('-').map(Number); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((new Date(y, m - 1, d) - t) / 864e5); }
+function fristen() {
+  const heute = todayIso(), f = [];
+  S.belege.forEach(b => {
+    if (b._pending) return;
+    const was = prodList(b.produkte)[0] || b.haendler || 'Beleg';
+    if (b.rueckgabe_bis && b.retoure !== 'komplett' && b.rueckgabe_bis >= heute && tageBis(b.rueckgabe_bis) <= 7)
+      f.push({ b, art: 'Rückgabefrist endet', was, datum: b.rueckgabe_bis });
+    if (b.bezahlt === false && b.faellig_am && tageBis(b.faellig_am) <= 7)
+      f.push({ b, art: 'Rechnung bezahlen', was: b.haendler || was, datum: b.faellig_am, betrag: b.betrag });
+    if (b.garantie_bis && b.retoure !== 'komplett' && b.garantie_bis >= heute && tageBis(b.garantie_bis) <= 28)
+      f.push({ b, art: 'Garantie endet', was, datum: b.garantie_bis });
+    if (b.retoure && b.erstattung_status === 'offen' && b.retoure_am) {
+      const soll = addIso(b.retoure_am, { days: 14 });
+      if (soll <= heute) f.push({ b, art: 'Erstattung noch nicht da', was: b.haendler || was, datum: soll, betrag: b.retoure === 'komplett' ? b.betrag : b.erstattet });
+    }
+  });
+  return f.sort((a, b) => a.datum.localeCompare(b.datum));
+}
+function fristenHtml(liste) {
+  if (!liste.length) return '';
+  const wann = d => { const t = tageBis(d); return t < 0 ? `seit ${-t} Tag${t === -1 ? '' : 'en'}` : t === 0 ? 'heute' : t === 1 ? 'morgen' : `in ${t} Tagen`; };
+  return `<section class="card"><h3><span>Demnächst fällig</span><small>${liste.length}</small></h3>
+    ${liste.slice(0, 8).map(x => { const t = tageBis(x.datum), rot = t <= 2;
+      return `<button class="katrow" data-open="${esc(x.b.id)}"><span class="irow"><span><b style="font-weight:600">${esc(x.art)}</b> · ${esc(x.was)}</span>
+        <span class="amt" style="color:${rot ? 'var(--danger)' : 'var(--muted)'};font-weight:600">${wann(x.datum)}</span></span>
+        <span class="irow sub"><span>${fmtDate(x.datum)}</span><span>${x.betrag ? EUR.format(x.betrag) : ''}</span></span></button>`; }).join('')}
+    ${liste.length > 8 ? `<p class="hint">… und ${liste.length - 8} weitere</p>` : ''}</section>`;
+}
+
 /* ───── Erfassen ───── */
 function renderErfassen() {
   const offen = S.belege.filter(b => b.status === 'zu prüfen').length;
@@ -449,6 +480,7 @@ function renderErfassen() {
     ${S.hatKey ? '' : '<p class="hint warn">Kein API-Schlüssel hinterlegt – die automatische Erkennung ist aus. Unter „Mehr“ eintragen.</p>'}
   </section>
   <section class="card" data-capture hidden></section>
+  ${fristenHtml(fristen())}
   ${unbez.length ? `<button class="card notice" data-offen>${unbez.length} offene Rechnung${unbez.length > 1 ? 'en' : ''} · ${EUR.format(unbez.reduce((s, b) => s + b.betrag, 0))}${ueberf ? ` – davon ${ueberf} überfällig` : ''} →</button>` : ''}
   ${offen ? `<button class="card notice" data-pruefen>${offen} Beleg${offen > 1 ? 'e' : ''} aus Gmail warten auf deine Prüfung →</button>` : ''}
   ${recent.length ? `<p class="section-title">Zuletzt erfasst</p><div class="list" style="margin-top:8px">${recent.map(cardHtml).join('')}</div>` : ''}`;
@@ -457,6 +489,7 @@ function renderErfassen() {
   const of = $('[data-offen]'); if (of) of.onclick = () => { Object.assign(S.filter, { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: false, garantie: false, offen: true, steuer: false, erst: false }); go('archiv'); };
   const pr = $('[data-pruefen]'); if (pr) pr.onclick = () => { Object.assign(S.filter, { q: '', zeitraum: 'alle', kat: '', person: '', pruefen: true, garantie: false, offen: false, steuer: false, erst: false }); go('archiv'); };
   wireList($('#main'));
+  $$('[data-open]', $('#main')).forEach(r => r.onclick = () => openDetail(r.dataset.open));
 }
 
 async function handleFiles(files) {

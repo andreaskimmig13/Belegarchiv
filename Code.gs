@@ -2,12 +2,12 @@
  * Belegarchiv – Google Apps Script Web-App
  * Speichert Belege in Google Drive, Daten in einem Google Sheet,
  * liest Belege mit der Claude API aus, importiert Rechnungen aus Gmail
- * und legt Garantie-Erinnerungen im Google Kalender an.
+ * (nur lesend). Fristen werden in der App angezeigt, nicht im Kalender.
  *
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -114,8 +114,6 @@ function setup() {
     .filter(t => t.getHandlerFunction() === 'gmailImportTrigger')
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('gmailImportTrigger').timeBased().everyDays(1).atHour(6).create();
-
-  CalendarApp.getDefaultCalendar(); // Kalender-Berechtigung abfragen
 
   Logger.log(uebernommen
     ? 'Fertig. Bestehende Daten übernommen: ' + Math.max(sh.getLastRow() - 1, 0) + ' Belege.'
@@ -282,7 +280,7 @@ function saveReceipt(data) {
       o.mime = data.mime;
     }
     normRetoure_(o);
-    o.kalender_ids = createReminders_(o);
+    o.kalender_ids = '';
     sheet_().appendRow(toRow_(o));
     return o;
   } finally {
@@ -312,14 +310,6 @@ function updateReceipt(id, fields) {
       } catch (e) { Logger.log(e); }
     }
 
-    if (o.garantie_bis !== old.garantie_bis || o.rueckgabe_bis !== old.rueckgabe_bis ||
-        o.haendler !== old.haendler || o.produkte !== old.produkte ||
-        o.bezahlt !== old.bezahlt || o.faellig_am !== old.faellig_am ||
-        o.retoure !== old.retoure || o.erstattung_status !== old.erstattung_status || o.retoure_am !== old.retoure_am) {
-      deleteReminders_(old.kalender_ids);
-      o.kalender_ids = createReminders_(o);
-    }
-
     sh.getRange(idx, 1, 1, COLS.length).setValues([toRow_(o)]);
     return o;
   } finally {
@@ -336,7 +326,6 @@ function deleteReceipt(id) {
     if (idx < 0) return true;
     const o = toObj_(sh.getRange(idx, 1, 1, COLS.length).getValues()[0]);
     if (o.datei_id) { try { DriveApp.getFileById(o.datei_id).setTrashed(true); } catch (e) { Logger.log(e); } }
-    deleteReminders_(o.kalender_ids);
     sh.deleteRow(idx);
     return true;
   } finally {
@@ -806,7 +795,7 @@ function saveSettings(s) {
   };
 }
 
-/* ───────────────────────── Kalender ───────────────────────── */
+/* ───────────────────────── Retouren ───────────────────────── */
 
 function netto_(r) {
   if (r.retoure === 'komplett') return 0;
@@ -825,48 +814,6 @@ function normRetoure_(o) {
     o.erstattet = o.betrag;
     o.garantie_bis = ''; o.rueckgabe_bis = ''; o.inventar = false;
   }
-}
-
-function createReminders_(o) {
-  const ids = [];
-  try {
-    const cal = CalendarApp.getDefaultCalendar();
-    const heute = parseDate_(today_());
-    const was = (o.produkte ? String(o.produkte).split(';')[0].trim() : '') || o.haendler || 'Beleg';
-    const info = 'Händler: ' + o.haendler + '\nKaufdatum: ' + fmtDE_(o.datum) + '\nBetrag: ' + de_(o.betrag) + ' €';
-    if (o.retoure && o.erstattung_status === 'offen') {
-      let d = addDays_(parseDate_(o.retoure_am || today_()), CFG.ERSTATTUNG_ERINNERUNG_TAGE);
-      if (d < heute) d = heute;
-      const soll = o.retoure === 'komplett' ? o.betrag : (o.erstattet || 0);
-      ids.push(cal.createAllDayEvent('Erstattung prüfen: ' + (o.haendler || was) + (soll ? ' (' + de_(soll) + ' €)' : ''), d,
-        { description: 'Retoure ' + o.retoure + ' am ' + fmtDE_(o.retoure_am) + ' – ist das Geld schon zurück?\n' + info }).getId());
-    }
-    if (o.retoure === 'komplett') return ids.join(',');
-    if (o.garantie_bis) {
-      const d = addDays_(parseDate_(o.garantie_bis), -CFG.GARANTIE_VORLAUF_TAGE);
-      if (d >= heute) ids.push(cal.createAllDayEvent('Garantie endet bald: ' + was, d,
-        { description: 'Garantie/Gewährleistung bis ' + fmtDE_(o.garantie_bis) + '\n' + info }).getId());
-    }
-    if (o.rueckgabe_bis) {
-      let d = addDays_(parseDate_(o.rueckgabe_bis), -CFG.RUECKGABE_VORLAUF_TAGE);
-      if (d < heute) d = heute;
-      if (parseDate_(o.rueckgabe_bis) >= heute) ids.push(cal.createAllDayEvent('Rückgabefrist endet: ' + was, d,
-        { description: 'Rückgabe möglich bis ' + fmtDE_(o.rueckgabe_bis) + '\n' + info }).getId());
-    }
-    if (o.faellig_am && o.bezahlt === false) {
-      let d = addDays_(parseDate_(o.faellig_am), -CFG.FAELLIG_VORLAUF_TAGE);
-      if (d < heute) d = heute;
-      ids.push(cal.createAllDayEvent('Rechnung bezahlen: ' + (o.haendler || was) + ' (' + de_(o.betrag) + ' €)', d,
-        { description: 'Fällig am ' + fmtDE_(o.faellig_am) + '\n' + info }).getId());
-    }
-  } catch (e) { Logger.log('Kalender: ' + e); }
-  return ids.join(',');
-}
-
-function deleteReminders_(idsStr) {
-  String(idsStr || '').split(',').filter(String).forEach(id => {
-    try { const ev = CalendarApp.getEventById(id); if (ev) ev.deleteEvent(); } catch (e) { /* ignorieren */ }
-  });
 }
 
 /* ───────────────────────── Hilfsfunktionen ───────────────────────── */

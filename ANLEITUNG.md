@@ -19,7 +19,7 @@ Am besten am PC einrichten, danach nutzt du die App auf dem Handy.
 
 ## 3. Einrichtung ausführen
 1. Oben in der Funktionsauswahl **setup** wählen → **Ausführen**.
-2. Google fragt nach Berechtigungen (Drive, Tabellen, Gmail nur lesen, Kalender, externe Verbindungen).
+2. Google fragt nach Berechtigungen (Drive, Tabellen, Gmail nur lesen, externe Verbindungen).
    Da es dein eigenes Skript ist, erscheint „Google hat diese App nicht überprüft“ →
    **Erweitert** → **Zu Belegarchiv wechseln (unsicher)** → **Zulassen**.
    Das ist normal für private Skripte; die Daten bleiben in deinem Konto.
@@ -45,7 +45,7 @@ Fertig. Beim ersten Foto fragt das Handy, ob die App auf die Kamera zugreifen da
 ## Gut zu wissen
 - **Wo liegen die Daten?** Bilder/PDFs in Drive unter `Belegarchiv/<Jahr>/`, benannt wie `2026-10-18_Bauhaus_49,90EUR.jpg`. Alle Angaben stehen in der Tabelle – du kannst dort auch direkt filtern oder auswerten.
 - **Gmail-Import:** liest Mails der letzten 30 Tage mit Begriffen wie Rechnung, Bestellung, Erstattung – **nur lesend** (Berechtigung „E-Mails ansehen“). Bereits geprüfte Mails merkt sich die App in einem ausgeblendeten Tabellenblatt „Gmail-geprüft“; an deinen Mails wird nichts verändert.
-- **Erinnerungen:** Garantie-Ende → Termin im Google Kalender 4 Wochen vorher; Rückgabefrist → 2 Tage vorher.
+- **Fristen:** Rückgabefristen, fällige Rechnungen (7 Tage vorher), Garantie-Ende (4 Wochen vorher) und ausstehende Erstattungen (14 Tage nach Retoure) erscheinen in der App unter „Demnächst fällig“. Die App hat keinen Kalenderzugriff.
 - **Kosten:** Pro Beleg fallen bei der Claude API typischerweise Bruchteile eines Cents bis wenige Cent an. Günstiger geht's mit dem Modell `claude-haiku-5-5` (unter *Mehr → KI-Modell*), etwas weniger genau bei schlechten Fotos.
 - **Code ändern:** Nach jeder Änderung **Bereitstellen → Bereitstellungen verwalten → Bearbeiten (Stift) → Version: Neue Version → Bereitstellen**. Die URL bleibt gleich.
 - **Kategorien/Personen** änderst du jederzeit in der App unter *Mehr*.
