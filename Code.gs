@@ -51,7 +51,7 @@ const BELEG_ARTEN = ['rechnung', 'quittung', 'zahlungsbestaetigung', 'bestellbes
 
 const STEUER_ARTEN = ['Handwerker/haushaltsnah', 'Kinderbetreuung'];
 
-const DEFAULT_PERSONEN = ['Andreas', 'Anna-Lena', 'Paul', 'Emmi'];
+const DEFAULT_PERSONEN = ['Ich']; // nur Vorbelegung beim allerersten Einrichten; danach in der App unter Mehr → Einstellungen
 const DEFAULT_KATEGORIEN = [
   'Elektronik & Haushalt', 'Lebensmittel & Drogerie', 'Baumarkt & Handwerker',
   'Kleidung & Freizeit', 'Restaurant', 'Tanken', 'Sonstiges'
