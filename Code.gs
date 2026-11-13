@@ -7,7 +7,7 @@
  * Einmalig ausführen: setup()
  */
 
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.10.1';
 
 const CFG = {
   ROOT_FOLDER: 'Belegarchiv',
@@ -455,6 +455,7 @@ function ladeMail_(id) {
     getPlainBody: () => text,
     getBody: () => html || ('<pre>' + escHtml_(text) + '</pre>'),
     getAttachments: () => anhaenge.map(a => ({
+      getName: () => a.name || '',
       getContentType: () => a.mime,
       getSize: () => a.size,
       getBytes: () => b64web_(a.data || Gmail.Users.Messages.Attachments.get('me', id, a.attachmentId).data)
@@ -498,9 +499,11 @@ function importGmail_() {
     const personen = JSON.parse(props_().getProperty('PERSONEN') || '[]');
     let ich = '';
     try { ich = String(Gmail.Users.getProfile('me').emailAddress || '').toLowerCase(); } catch (e) { ich = ''; }
+    // Bewusst breit: die Vorsortierung per KI ist günstig und filtert Unpassendes heraus
     const q = 'newer_than:' + CFG.GMAIL_TAGE + 'd -category:promotions -category:social -from:me -in:sent -in:drafts' +
-      ' {rechnung invoice quittung kaufbeleg receipt "ihre bestellung" bestellbestätigung zahlungsbestätigung "your order"' +
-      ' erstattung rückerstattung rückzahlung gutschrift refund "retoure"}';
+      ' {rechnung invoice quittung kaufbeleg kassenbon receipt bestellung bestellübersicht bestellnummer bestellbestätigung' +
+      ' auftragsbestätigung kaufbestätigung zahlungsbestätigung zahlungseingang gesamtsumme gesamtbetrag order "your order"' +
+      ' erstattung rückerstattung rückzahlung gutschrift refund retoure}';
     const ids = (Gmail.Users.Messages.list('me', { q: q, maxResults: 100 }).messages || [])
       .map(m => m.id).filter(id => !known.has(id)).slice(0, CFG.GMAIL_MAX_MAILS);
     const st = { importiert: 0, zusammengefuehrt: 0, uebersprungen: 0, erstattungen: 0, geprueft: 0, fehler: 0, gefunden: ids.length };
@@ -542,24 +545,23 @@ function importGmail_() {
         const kontext = 'E-Mail von ' + msg.getFrom() + ', Betreff: ' + msg.getSubject() +
           ', empfangen am ' + Utilities.formatDate(msg.getDate(), tz_(), 'yyyy-MM-dd') + '.' +
           (weitergeleitet ? ' ACHTUNG: Diese Mail wurde weitergeleitet. Nur als Beleg werten, wenn eindeutig eine Rechnung oder Quittung über einen getätigten Kauf enthalten ist – nicht bei Angeboten, Anfragen oder Diskussionen über Preise.' : '');
+        // Anhänge ohne Belegcharakter (Widerrufsbelehrung, AGB …) gar nicht erst auslesen
+        const UNWICHTIG = /(widerruf|agb|geschäftsbedingung|terms|datenschutz|privacy|policy|bedingungen|informationsblatt|produktinfo|bedienungsanleitung|newsletter|logo)/i;
         const atts = msg.getAttachments()
-          .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000)
-          .slice(0, 3);
-        proMail[id] = { offen: 0, ergebnis: 'uebersprungen', fehler: false };
-        if (atts.length) {
-          atts.forEach(a => {
-            const mime = a.getContentType();
-            const b64 = Utilities.base64Encode(a.getBytes());
-            const block = mime === 'application/pdf'
-              ? { type: 'document', source: { type: 'base64', media_type: mime, data: b64 } }
-              : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
-            aufgaben.push({ id, msg, weitergeleitet, b64, mime, content: [block, { type: 'text', text: kontext + '\n\n' + prompt_() }] });
-            proMail[id].offen++;
-          });
-        } else {
-          aufgaben.push({ id, msg, weitergeleitet, kontext, content: [{ type: 'text', text: kontext + '\n\nInhalt der E-Mail:\n' + msg.getPlainBody().slice(0, 12000) }, { type: 'text', text: prompt_() }] });
-          proMail[id].offen++;
-        }
+          .filter(a => /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(a.getContentType()) && a.getSize() > 8000 && !UNWICHTIG.test(a.getName()))
+          .slice(0, 3)
+          .map(a => ({ name: a.getName(), mime: a.getContentType(), b64: Utilities.base64Encode(a.getBytes()) }));
+        // EINE Anfrage pro Mail: Mailtext + relevante Anhänge zusammen – die KI sagt, wo der Beleg steckt
+        const content = atts.map(a => a.mime === 'application/pdf'
+          ? { type: 'document', source: { type: 'base64', media_type: a.mime, data: a.b64 } }
+          : { type: 'image', source: { type: 'base64', media_type: a.mime, data: a.b64 } });
+        const anhangInfo = atts.length
+          ? 'Beigefügt sind ' + atts.length + ' Anhang/Anhänge in dieser Reihenfolge: ' + atts.map((a, i) => (i + 1) + ' = „' + a.name + '“').join(', ') + '.\n'
+          : 'Die Mail hat keine relevanten Anhänge.\n';
+        content.push({ type: 'text', text: kontext + '\n' + anhangInfo + '\nInhalt der E-Mail:\n' + msg.getPlainBody().replace(/<https?:[^>]+>/g, '').slice(0, 12000) });
+        content.push({ type: 'text', text: prompt_() + '\nZusätzliches Feld "quelle": Nummer des Anhangs (1, 2, …), der die eigentliche Rechnung/Quittung ist, oder 0, wenn die Angaben nur im Mailtext stehen.' });
+        proMail[id] = { offen: 1, ergebnis: 'uebersprungen', fehler: false };
+        aufgaben.push({ id, msg, weitergeleitet, kontext, atts, content });
       } catch (e) {
         Logger.log('Mail ' + id + ': ' + e); st.fehler++;
         if (!st.fehlertext) st.fehlertext = String(e && e.message || e).slice(0, 200);
@@ -576,8 +578,10 @@ function importGmail_() {
         const d = normExtract_(r.text);
         const ok = d.ist_beleg && d.betrag != null && (!a.weitergeleitet || d.dokumentart === 'rechnung' || d.dokumentart === 'quittung');
         let ergebnis = 'uebersprungen';
+        const q = Number(d.quelle) || 0;
+        const anhang = q >= 1 && q <= (a.atts || []).length ? a.atts[q - 1] : null;
         if (d.dokumentart === 'erstattung') ergebnis = verbucheErstattung_(d, a.msg, rows);
-        else if (ok && a.b64) ergebnis = saveFromMail_(d, a.b64, a.mime, a.msg, personen, rows);
+        else if (ok && anhang) ergebnis = saveFromMail_(d, anhang.b64, anhang.mime, a.msg, personen, rows);
         else if (ok) {
           const html = '<html><head><meta charset="utf-8"></head><body>' +
             '<p style="font:12px sans-serif;color:#555">' + escHtml_(a.kontext) + '</p>' + a.msg.getBody() + '</body></html>';
