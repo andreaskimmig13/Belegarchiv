@@ -18,6 +18,7 @@
 ## Git & Veröffentlichung
 - Ein Push auf `main` geht sofort live (Vercel / GitHub Pages) – auch für andere Nutzer. **Nie auf `main` pushen ohne meine Freigabe.**
 - Nach jedem abgeschlossenen, getesteten Feature einen Commit mit verständlicher deutscher Beschreibung vorschlagen.
+- **Noch nicht freigegebene Änderungen** nur auf den festen Zweig `entwurf` hochladen (wiederverwenden, nicht neu anlegen). **Keine weiteren Zweige anlegen** – Claude kann Zweige auf GitHub nicht wieder löschen.
 
 ## Sicherheit & Daten (Supabase / APIs)
 - **Geheime Schlüssel:** API-Keys nur in `.env` bzw. in den Umgebungsvariablen von Vercel – nie im Code, nie committen. `.env` muss in `.gitignore` stehen. Der Supabase-`service_role`-Key darf nie im Frontend verwendet werden. Öffentliche Repos besonders beachten: alles im Code ist für jeden sichtbar.
